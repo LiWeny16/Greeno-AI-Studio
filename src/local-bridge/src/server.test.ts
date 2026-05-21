@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import process from "node:process";
 import { createServer } from "./server";
 import type { BridgeConfig } from "./config";
 
@@ -8,7 +9,12 @@ const config: BridgeConfig = {
   port: 8787,
   projectRoot: ".tmp/cc-music-test",
   testMode: true,
-  workers: "mock"
+  workers: "mock",
+  pythonWorker: {
+    enabled: false,
+    pythonPath: process.cwd(),
+    requestTimeoutMs: 30000,
+  },
 };
 
 describe("local bridge", () => {

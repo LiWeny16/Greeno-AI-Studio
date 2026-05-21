@@ -65,18 +65,9 @@ Parent-owned unless explicitly assigned:
 |---|---|---|---|---|
 | W3-L | Worker L | `src/packages/agent-protocol/**` if assigned by parent | unapproved schema changes | stream/proposal schema tests |
 | W3-La | Worker La | `src/packages/agent-protocol/src/tools*.ts` | bridge adapters, UI | tool schema + registry tests |
-| W3-M | Worker M | `src/local-bridge/src/agent/**` (graph, state, adapters, tools) | project file format | LangGraph mock ReAct loop tests (all nodes, all failure modes) |
+| W3-M | Worker M | `src/workers/python/cc_music/agent/**` and `src/local-bridge/src/api/agent*` | project file format | Python mock ReAct loop tests via pytest, bridge agent route inject tests |
 | W3-N | Worker N | `src/studio-web/src/features/agent-panel/**` (streaming thought log, diff display) | bridge adapters | agent patch E2E with streaming |
 | W3-O | Worker O | `src/packages/timeline-engine/src/undo*.ts`, `src/local-bridge/src/projects/snapshots*` | unrelated UI | undo/snapshot tests |
-
-### Wave 3A: LangGraph ReAct Agent (new sub-wave)
-
-| Task ID | Owner | Allowed Files | Forbidden Files | Required Tests |
-|---|---|---|---|---|
-| W3A-P | Worker 3A-P | `src/local-bridge/src/agent/graph.ts` | tool implementations, UI | graph node transition tests, safety limit tests |
-| W3A-Q | Worker 3A-Q | `src/local-bridge/src/agent/tools/read-ir.ts`, `src/local-bridge/src/agent/tools/generate.ts` | graph definition, UI | tool execution tests with Music IR fixtures |
-| W3A-R | Worker 3A-R | `src/local-bridge/src/agent/tools/validate.ts`, `src/local-bridge/src/agent/tools/build-patch.ts` | graph definition, UI | schema validation + lock check tests |
-| W3A-S | Worker 3A-S | `src/local-bridge/src/agent/adapters/mock.ts` | real LLM backends, project files | full mock ReAct loop integration test (10-step demo prompt) |
 
 ## Wave 4
 

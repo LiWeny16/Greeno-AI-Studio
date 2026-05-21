@@ -274,11 +274,11 @@ Responsibilities:
 - Bar/beat/time conversion.
 - Section range math.
 - Selection model.
-- Motif transforms.
-- Chord-aware note helpers.
 - MIDI clip split/merge.
 - Undo/redo command primitives.
 - Boundary smoothing for selected-bar regeneration.
+
+Motif transforms, chord-aware note helpers, and all music computation live in the Python engine (`src/workers/python/cc_music/music/`). The timeline-engine provides only bar/beat/time math and selection primitives used by the Konva canvas.
 
 This package is heavily unit tested because it is the product's control layer.
 

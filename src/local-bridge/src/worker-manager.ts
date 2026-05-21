@@ -13,7 +13,7 @@ export interface WorkerStreamEvent {
 
 export interface PythonWorker {
   /** Send a JSON-RPC request. Returns a promise that resolves with the result. */
-  request(method: string, params: Record<string, unknown>): Promise<unknown>;
+  request(method: string, params?: Record<string, unknown>): Promise<unknown>;
 
   /** Subscribe to stream events (messages, progress) from the Python worker. */
   onEvent(callback: (event: WorkerStreamEvent) => void): void;

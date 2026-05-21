@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { rm, mkdir } from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
 import { createServer } from "./server";
 import type { BridgeConfig } from "./config";
 
@@ -13,6 +14,11 @@ const config: BridgeConfig = {
   projectRoot: TEST_ROOT,
   testMode: true,
   workers: "mock",
+  pythonWorker: {
+    enabled: false,
+    pythonPath: process.cwd(),
+    requestTimeoutMs: 30000,
+  },
 };
 
 let app: Awaited<ReturnType<typeof createServer>>;

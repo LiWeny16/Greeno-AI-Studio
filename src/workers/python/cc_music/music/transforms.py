@@ -1,4 +1,30 @@
-"""Music transforms — transpose, motif variation, quantize, etc.
+"""
+Music transform functions. ALL canonical music computation lives here.
+These are the real transforms used in the mutation pipeline.
+The TypeScript timeline-engine has stripped-down versions for UI display only.
+
+Public API:
+    Note-level:
+        transpose_notes(notes, semitones) -> notes
+        quantize_notes(notes, grid_16ths=4) -> notes
+        scale_velocity(notes, factor) -> notes
+        shift_notes(notes, offset_beats) -> notes
+
+    Motif-level:
+        repeat_motif(motif, times) -> motif
+        invert_motif(motif, center_pitch) -> motif
+        stretch_motif_rhythm(motif, factor) -> motif
+        generate_motif_variation(motif, seed=0) -> motif
+
+    Pitch helpers:
+        PITCH_TO_MIDI, MIDI_TO_PITCH (lookup tables)
+        pitch_to_midi(pitch) -> int
+        midi_to_pitch(midi) -> str
+
+    Scale helpers:
+        SCALES (lookup table)
+        is_note_in_scale(pitch, scale) -> bool
+        closest_scale_tone(pitch, scale) -> str
 
 All transforms operate on note/motif dicts and return new dicts.
 They NEVER mutate inputs in place.
@@ -86,7 +112,7 @@ def pitch_to_midi(pitch: str) -> int:
     if not match:
         raise ValueError(f"Invalid pitch format: {pitch!r}")
     letter, accidental, octave_str = match.groups()
-    key = letter.upper() + (accidental.capitalize() if accidental else "")
+    key = letter.upper() + accidental  # accidental is already "#" or "b" from regex
     if key not in PITCH_TO_MIDI:
         raise ValueError(f"Invalid pitch name: {pitch!r}")
     semitone = PITCH_TO_MIDI[key]

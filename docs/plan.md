@@ -307,7 +307,7 @@ Local bridge:
 
 Workers:
 
-- MVP: TypeScript deterministic MIDI generation and transform logic.
+- MVP: Python engine for all compute (agent, transforms, MIDI IO). TypeScript timeline-engine for bar/beat math and selection only.
 - Phase 2: Python workers for Basic Pitch, FluidSynth/ffmpeg render, audio analysis.
 - Phase 3: ACE-Step, Demucs, image-to-music-brief, and other optional heavy adapters.
 

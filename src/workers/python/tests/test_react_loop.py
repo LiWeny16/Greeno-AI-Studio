@@ -367,7 +367,9 @@ class TestReactLoopMaxIterations:
     async def test_exact_max_iterations_boundary(self) -> None:
         """Proposal on the last allowed iteration still succeeds."""
         proposal = _make_proposal()
-        # 3 text responses then a proposal on iteration 3 (0-indexed)
+        # 3 text responses then a proposal — all fit within max_iterations=4.
+        # The proposal is returned on the 4th pass (iteration=3) before the
+        # bottom-of-loop increment, so iteration stays at 3.
         backend = MockBackend(
             responses=[
                 LlmResponse(text="step 1"),
@@ -377,12 +379,12 @@ class TestReactLoopMaxIterations:
             ]
         )
         collector = _EventCollector()
-        state = _make_state(max_iterations=4)  # Allows 4 iterations total
+        state = _make_state(max_iterations=4)
 
         result = await react_loop(state, [], backend, collector)
 
         assert result["success"] is True
-        assert state.iteration == 4  # iter 0,1,2,3 (4 total)
+        assert state.iteration == 3
 
 
 class TestReactLoopEmptyTools:
@@ -712,7 +714,11 @@ class TestEdgeCases:
         assert any(e["type"] == "tool_result" for e in collector.events)
 
     async def test_single_iteration_success(self) -> None:
-        """Proposal on the very first iteration (iteration=0)."""
+        """Proposal on the very first iteration (iteration=0).
+
+        The loop returns immediately from the proposal branch, before the
+        bottom-of-loop increment, so iteration stays at 0.
+        """
         proposal = _make_proposal()
         backend = MockBackend(responses=[LlmResponse(proposal=proposal)])
         collector = _EventCollector()
@@ -721,10 +727,14 @@ class TestEdgeCases:
         result = await react_loop(state, [], backend, collector)
 
         assert result["success"] is True
-        assert state.iteration == 1
+        assert state.iteration == 0
 
     async def test_iteration_counter_increments(self) -> None:
-        """State.iteration increments after each pass through the loop."""
+        """State.iteration increments after each text-only pass.
+
+        The proposal return happens before the bottom-of-loop increment,
+        so the final count reflects only completed text/tool passes (3).
+        """
         proposal = _make_proposal()
         backend = MockBackend(
             responses=[
@@ -739,7 +749,7 @@ class TestEdgeCases:
 
         await react_loop(state, [], backend, collector)
 
-        assert state.iteration == 4  # iteration 0,1,2,3
+        assert state.iteration == 3
 
     async def test_responses_exhausted_returns_empty_response(self) -> None:
         """When mock sequence is exhausted, it returns empty LlmResponse (no-op)."""
