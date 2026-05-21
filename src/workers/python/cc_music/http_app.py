@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -71,6 +72,8 @@ from cc_music.music.ir import (
 from cc_music.music.midi_io import export_midi as midi_export
 from cc_music.music.midi_io import import_midi as midi_import_file
 from cc_music.music.validate import validate_music_ir, validate_patch_proposal, check_lock_violations
+
+logger = logging.getLogger("cc_music.http_app")
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -159,19 +162,44 @@ async def security_middleware(request: Request, call_next):
     if request.url.path == "/api/health":
         return await call_next(request)
 
-    # --- Origin check ---
     origin = request.headers.get("origin")
+    expected_token = _get_local_token()
+    received_token = request.headers.get("x-local-token", "")
+    host = request.headers.get("host", "none")
+
+    logger.warning(
+        "Auth check: origin=%s expected_token=%s received_token=%s host=%s",
+        origin or "none",
+        expected_token[:8],
+        received_token[:8],
+        host,
+    )
+
+    # --- Token check first (dev mode: valid token bypasses strict origin) ---
+    if expected_token and received_token and secrets.compare_digest(received_token, expected_token):
+        return await call_next(request)
+
+    # --- Origin check ---
     validated = _validate_origin(origin)
     if validated is None:
-        return JSONResponse(
-            status_code=403,
-            content={"error": "Forbidden: invalid or missing origin"},
-        )
+        # If the caller explicitly sent an invalid Origin (cross-origin from a
+        # non-localhost page), reject immediately.
+        if origin is not None:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Forbidden: invalid origin"},
+            )
+        # Origin is absent (browser same-origin request through a local proxy).
+        # Accept when the Host header is a localhost address.
+        host_origin = f"http://{host}" if host != "none" else ""
+        if not LOCAL_ORIGIN_RE.match(host_origin):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Forbidden: missing origin on non-localhost request"},
+            )
 
     # --- Local token check ---
-    token = request.headers.get("x-local-token", "")
-    local_token = _get_local_token()
-    if not local_token or not token or not secrets.compare_digest(token, local_token):
+    if not expected_token or not received_token or not secrets.compare_digest(received_token, expected_token):
         return JSONResponse(
             status_code=401,
             content={"error": "Unauthorized: missing or invalid X-Local-Token"},

@@ -13,6 +13,16 @@ export default defineConfig({
         headers: {
           "X-Local-Token": "dev-token",
         },
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq, req) => {
+            // Same-origin requests through the Vite dev server do not carry an
+            // Origin header, but the Python backend requires one for security.
+            // Inject a valid localhost origin when none is present.
+            if (!proxyReq.getHeader("origin")) {
+              proxyReq.setHeader("Origin", "http://localhost:5173");
+            }
+          });
+        },
       },
       "/ws": {
         target: process.env.VITE_CC_MUSIC_BRIDGE_URL ?? "ws://127.0.0.1:8787",
