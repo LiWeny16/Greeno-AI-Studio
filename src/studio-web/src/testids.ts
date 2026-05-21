@@ -1,8 +1,21 @@
 export const testIds = {
   appShell: "app-shell",
+  topBar: "top-bar",
+  leftRail: "left-rail",
+  rightInspector: "right-inspector",
+  bottomPanel: "bottom-panel",
   timelineCanvas: "timeline-canvas",
   pianoRollCanvas: "piano-roll-canvas",
   agentPanel: "agent-panel",
   inspector: "inspector",
-  transport: "transport"
+  transport: "transport",
+  transportPlay: "transport-play",
+  transportStop: "transport-stop",
+  agentPrompt: "agent-prompt",
+  agentSend: "agent-send",
+  patchApply: "patch-apply",
+  patchReject: "patch-reject",
+  exportMidi: "export-midi",
+  editorTabs: "editor-tabs",
+  jobQueue: "job-queue",
 } as const;
