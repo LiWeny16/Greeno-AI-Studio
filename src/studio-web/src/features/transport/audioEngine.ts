@@ -68,7 +68,16 @@ export async function startPlayback(
   polySynth = new Tone.PolySynth({
     voice: Tone.Synth,
     maxPolyphony: 8,
-    options: { volume: -8 },
+    options: {
+      oscillator: { type: "triangle" },
+      envelope: {
+        attack: 0.005,
+        decay: 0.1,
+        sustain: 0.3,
+        release: 1.0,
+      },
+      volume: -8,
+    },
   }).toDestination();
 
   if (gen !== generation) {

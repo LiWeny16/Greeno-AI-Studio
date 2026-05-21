@@ -13,6 +13,7 @@ import {
   Download,
   Undo2,
   Redo2,
+  AlertTriangle,
 } from "lucide-react";
 import { sampleMusicIr } from "@cc-music/music-ir";
 import { barRangeLength } from "@cc-music/timeline-engine";
@@ -177,11 +178,12 @@ export function App() {
               tooltip="Save project"
               size="sm"
               variant="ghost"
+              disabled={mode === 'offline'}
               onClick={() => saveMutation.mutate(musicIr)}
             >
               <Save className="h-4 w-4" />
             </IconButton>
-            <IconButton label="Open project" tooltip="Open project" size="sm" variant="ghost">
+            <IconButton label="Open project" tooltip="Open project" size="sm" variant="ghost" disabled={mode === 'offline'}>
               <FolderOpen className="h-4 w-4" />
             </IconButton>
             <IconButton
@@ -315,6 +317,14 @@ export function App() {
 
           {/* Center Editor */}
           <div className="flex flex-1 flex-col min-w-0">
+            {mode === 'offline' && (
+              <div className="flex items-center gap-2 border-b border-warning/20 bg-warning/5 px-3 py-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+                <span className="text-compact text-warning">
+                  Offline mode — using sample data. Start the backend: .\start.ps1
+                </span>
+              </div>
+            )}
             <Tabs
               value={activeEditorTab}
               onValueChange={(v) =>
