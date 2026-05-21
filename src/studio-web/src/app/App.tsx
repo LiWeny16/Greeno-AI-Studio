@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   Music2,
   Piano,
@@ -10,6 +11,8 @@ import {
   Save,
   FolderOpen,
   Download,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import { sampleMusicIr } from "@cc-music/music-ir";
 import { barRangeLength } from "@cc-music/timeline-engine";
@@ -17,6 +20,7 @@ import { testIds } from "../testids";
 import { useEditorStore } from "../stores/useEditorStore";
 import { usePanelStore } from "../stores/usePanelStore";
 import { useAgentUiStore } from "../stores/useAgentUiStore";
+import { useTransportStore } from "../stores/useTransportStore";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { IconButton } from "../components/ui/icon-button";
@@ -37,6 +41,10 @@ export function App() {
   const setActiveEditorTab = useEditorStore((s) => s.setActiveEditorTab);
   const previewPatchId = useEditorStore((s) => s.previewPatchId);
   const setPreviewPatchId = useEditorStore((s) => s.setPreviewPatchId);
+  const canUndo = useEditorStore((s) => s.canUndo);
+  const canRedo = useEditorStore((s) => s.canRedo);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
 
   const leftCollapsed = usePanelStore((s) => s.leftCollapsed);
   const rightCollapsed = usePanelStore((s) => s.rightCollapsed);
@@ -51,6 +59,35 @@ export function App() {
 
   const firstSection = musicIr.sections[0];
   const barCount = firstSection ? barRangeLength(firstSection.barRange) : 0;
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === " " && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        const transport = useTransportStore.getState();
+        transport.isPlaying ? transport.stop() : transport.play();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        useEditorStore.getState().undo();
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        useEditorStore.getState().redo();
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const editor = useEditorStore.getState();
+        if (editor.selectedNoteIds.length > 0) {
+          editor.clearSelection();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   return (
     <QueryProvider>
@@ -98,6 +135,30 @@ export function App() {
 
           {/* Transport */}
           <Transport />
+
+          {/* Undo / Redo */}
+          <div className="flex items-center gap-0.5">
+            <IconButton
+              label="Undo"
+              tooltip="Undo (Ctrl+Z)"
+              size="sm"
+              variant="ghost"
+              disabled={!canUndo}
+              onClick={undo}
+            >
+              <Undo2 className="h-4 w-4" />
+            </IconButton>
+            <IconButton
+              label="Redo"
+              tooltip="Redo (Ctrl+Y)"
+              size="sm"
+              variant="ghost"
+              disabled={!canRedo}
+              onClick={redo}
+            >
+              <Redo2 className="h-4 w-4" />
+            </IconButton>
+          </div>
 
           {/* Spacer */}
           <div className="flex-1" />

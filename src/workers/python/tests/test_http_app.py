@@ -77,12 +77,7 @@ class TestHealth:
 
     def test_capabilities_requires_auth(self, client, auth_headers):
         r = client.get("/api/system/capabilities", headers=auth_headers)
-        if r.status_code != 200:
-            print(f"\nRESPONSE BODY: {r.text}")
-            print(f"RESPONSE HEADERS: {dict(r.headers)}")
-            import cc_music.http_app as app_module
-            print(f"LOCAL_TOKEN: {app_module.LOCAL_TOKEN}")
-        assert r.status_code == 200
+        assert r.status_code == 200, r.text
         data = r.json()
         assert "codex" in data
         assert "claude" in data

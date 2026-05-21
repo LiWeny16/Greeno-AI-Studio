@@ -76,7 +76,17 @@ from cc_music.music.validate import validate_music_ir, validate_patch_proposal, 
 # ---------------------------------------------------------------------------
 
 PROJECT_ROOT: Path = Path(os.environ.get("CC_MUSIC_PROJECT_ROOT", Path.cwd() / "projects"))
-LOCAL_TOKEN: str = os.environ.get("CC_MUSIC_LOCAL_TOKEN", secrets.token_urlsafe(32))
+
+
+def _get_local_token() -> str:
+    """Read the local token from the environment at request time.
+
+    This avoids import-order issues during testing where the module may be
+    imported before the CC_MUSIC_LOCAL_TOKEN environment variable is set.
+    """
+    return os.environ.get("CC_MUSIC_LOCAL_TOKEN", "")
+
+
 ALLOWED_ORIGINS: set[str] = {
     "http://localhost:5173",
     "http://localhost:4173",
@@ -159,7 +169,8 @@ async def security_middleware(request: Request, call_next):
 
     # --- Local token check ---
     token = request.headers.get("x-local-token", "")
-    if not token or not secrets.compare_digest(token, LOCAL_TOKEN):
+    local_token = _get_local_token()
+    if not local_token or not token or not secrets.compare_digest(token, local_token):
         return JSONResponse(
             status_code=401,
             content={"error": "Unauthorized: missing or invalid X-Local-Token"},
@@ -401,9 +412,6 @@ async def capabilities():
 @app.post("/api/projects")
 async def create_project(request: Request):
     """Create a new project with default IR."""
-    ct = request.headers.get("content-type", "")
-    if "application/json" not in ct:
-        raise HTTPException(status_code=400, detail="Content-Type must be application/json")
     try:
         body = await request.json()
     except Exception:
@@ -1058,7 +1066,8 @@ async def ws_agent(websocket: WebSocket, project_id: str, session_id: str):
 
     # Token check (from query param or header)
     token = websocket.query_params.get("token", "") or websocket.headers.get("x-local-token", "")
-    if not token or not secrets.compare_digest(token, LOCAL_TOKEN):
+    local_token = _get_local_token()
+    if not local_token or not token or not secrets.compare_digest(token, local_token):
         await websocket.close(code=4001, reason="Unauthorized")
         return
 

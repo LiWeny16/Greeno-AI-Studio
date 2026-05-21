@@ -10,6 +10,9 @@ interface EditorState {
   zoom: number;
   scroll: { x: number; y: number };
   previewPatchId: string | null;
+  undoDepth: number;
+  canUndo: boolean;
+  canRedo: boolean;
 
   setActiveProjectId: (id: string | null) => void;
   setSelectedBarRange: (range: [number, number] | null) => void;
@@ -26,6 +29,8 @@ interface EditorState {
   setZoom: (zoom: number) => void;
   setScroll: (scroll: { x: number; y: number }) => void;
   setPreviewPatchId: (id: string | null) => void;
+  undo: () => void;
+  redo: () => void;
   clearSelection: () => void;
   reset: () => void;
 }
@@ -40,6 +45,9 @@ const initialEditorState = {
   zoom: 1,
   scroll: { x: 0, y: 0 },
   previewPatchId: null as string | null,
+  undoDepth: 0,
+  canUndo: false,
+  canRedo: true,
 };
 
 export const useEditorStore = create<EditorState>()((set) => ({
@@ -98,6 +106,18 @@ export const useEditorStore = create<EditorState>()((set) => ({
   setScroll: (scroll) => set({ scroll }),
 
   setPreviewPatchId: (id) => set({ previewPatchId: id }),
+
+  undo: () =>
+    set((s) => {
+      const newDepth = Math.max(0, s.undoDepth - 1);
+      return { undoDepth: newDepth, canUndo: newDepth > 0, canRedo: true };
+    }),
+
+  redo: () =>
+    set((s) => {
+      const newDepth = s.undoDepth + 1;
+      return { undoDepth: newDepth, canUndo: true, canRedo: false };
+    }),
 
   clearSelection: () =>
     set({
