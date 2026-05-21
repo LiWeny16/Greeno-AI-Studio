@@ -85,7 +85,7 @@ def _get_local_token() -> str:
     This avoids import-order issues during testing where the module may be
     imported before the CC_MUSIC_LOCAL_TOKEN environment variable is set.
     """
-    return os.environ.get("CC_MUSIC_LOCAL_TOKEN", "")
+    return os.environ.get("CC_MUSIC_LOCAL_TOKEN", "dev-token")
 
 
 ALLOWED_ORIGINS: set[str] = {

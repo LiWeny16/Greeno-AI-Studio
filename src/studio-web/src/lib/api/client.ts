@@ -12,9 +12,9 @@ export class ApiError extends Error {
   }
 }
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("cc-music-token");
+function getToken(): string {
+  if (typeof window === "undefined") return "dev-token";
+  return localStorage.getItem("cc-music-token") || "dev-token";
 }
 
 let _baseUrl: string = DEFAULT_BASE_URL;
@@ -37,10 +37,7 @@ async function request<T>(
     "Content-Type": "application/json",
   };
 
-  const token = getToken();
-  if (token) {
-    headers["x-cc-music-token"] = token;
-  }
+  headers["X-Local-Token"] = getToken();
 
   const res = await fetch(url, {
     method,
