@@ -1,0 +1,644 @@
+{
+  "MusicIr": {
+    "$defs": {
+      "LockState": {
+        "description": "Per-property locks that prevent mutation of specific aspects.",
+        "properties": {
+          "melody": {
+            "title": "Melody",
+            "type": "boolean"
+          },
+          "rhythm": {
+            "title": "Rhythm",
+            "type": "boolean"
+          },
+          "chords": {
+            "title": "Chords",
+            "type": "boolean"
+          },
+          "tempo": {
+            "title": "Tempo",
+            "type": "boolean"
+          },
+          "key": {
+            "title": "Key",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "melody",
+          "rhythm",
+          "chords",
+          "tempo",
+          "key"
+        ],
+        "title": "LockState",
+        "type": "object"
+      },
+      "MidiClip": {
+        "description": "A contiguous MIDI region on a track.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "barRange": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Barrange",
+            "type": "array"
+          },
+          "motifId": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Motifid"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/$defs/Note"
+            },
+            "title": "Notes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "barRange",
+          "notes"
+        ],
+        "title": "MidiClip",
+        "type": "object"
+      },
+      "Motif": {
+        "description": "A reusable musical phrase.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/$defs/Note"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/$defs/MotifSource"
+          },
+          "lockStrength": {
+            "default": 0.5,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Lockstrength",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "notes",
+          "source"
+        ],
+        "title": "Motif",
+        "type": "object"
+      },
+      "MotifSource": {
+        "description": "Origin of a motif.",
+        "properties": {
+          "type": {
+            "enum": [
+              "manual",
+              "imported_midi",
+              "agent",
+              "transform",
+              "audio_to_midi",
+              "image_brief"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "MotifSource",
+        "type": "object"
+      },
+      "Note": {
+        "description": "A single MIDI note within a motif or clip.",
+        "properties": {
+          "pitch": {
+            "minLength": 1,
+            "title": "Pitch",
+            "type": "string"
+          },
+          "startBeat": {
+            "minimum": 0,
+            "title": "Startbeat",
+            "type": "number"
+          },
+          "durationBeats": {
+            "exclusiveMinimum": 0,
+            "title": "Durationbeats",
+            "type": "number"
+          },
+          "velocity": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Velocity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "pitch",
+          "startBeat",
+          "durationBeats",
+          "velocity"
+        ],
+        "title": "Note",
+        "type": "object"
+      },
+      "Section": {
+        "description": "A contiguous range of bars with style, chords, and motif bindings.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "barRange": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Barrange",
+            "type": "array"
+          },
+          "style": {
+            "$ref": "#/$defs/Style"
+          },
+          "motifIds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Motifids",
+            "type": "array"
+          },
+          "chords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Chords",
+            "type": "array"
+          },
+          "locks": {
+            "$ref": "#/$defs/LockState"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "barRange",
+          "style",
+          "motifIds",
+          "chords",
+          "locks"
+        ],
+        "title": "Section",
+        "type": "object"
+      },
+      "Style": {
+        "description": "Stylistic constraints for a section.",
+        "properties": {
+          "genre": {
+            "minLength": 1,
+            "title": "Genre",
+            "type": "string"
+          },
+          "energy": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Energy",
+            "type": "number"
+          },
+          "instruments": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Instruments",
+            "type": "array"
+          }
+        },
+        "required": [
+          "genre",
+          "energy",
+          "instruments"
+        ],
+        "title": "Style",
+        "type": "object"
+      },
+      "Track": {
+        "description": "A single instrument track containing MIDI clips.",
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "const": "midi",
+            "title": "Type",
+            "type": "string"
+          },
+          "instrument": {
+            "minLength": 1,
+            "title": "Instrument",
+            "type": "string"
+          },
+          "clips": {
+            "items": {
+              "$ref": "#/$defs/MidiClip"
+            },
+            "title": "Clips",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "instrument",
+          "clips"
+        ],
+        "title": "Track",
+        "type": "object"
+      }
+    },
+    "description": "Canonical Music IR \u2014 the source of truth for a project.",
+    "properties": {
+      "schemaVersion": {
+        "const": 1,
+        "title": "Schemaversion",
+        "type": "integer"
+      },
+      "projectId": {
+        "minLength": 1,
+        "title": "Projectid",
+        "type": "string"
+      },
+      "title": {
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "tempo": {
+        "maximum": 240,
+        "minimum": 40,
+        "title": "Tempo",
+        "type": "integer"
+      },
+      "key": {
+        "minLength": 1,
+        "title": "Key",
+        "type": "string"
+      },
+      "timeSignature": {
+        "pattern": "^\\d+/\\d+$",
+        "title": "Timesignature",
+        "type": "string"
+      },
+      "sections": {
+        "items": {
+          "$ref": "#/$defs/Section"
+        },
+        "title": "Sections",
+        "type": "array"
+      },
+      "motifs": {
+        "items": {
+          "$ref": "#/$defs/Motif"
+        },
+        "title": "Motifs",
+        "type": "array"
+      },
+      "tracks": {
+        "items": {
+          "$ref": "#/$defs/Track"
+        },
+        "title": "Tracks",
+        "type": "array"
+      }
+    },
+    "required": [
+      "schemaVersion",
+      "projectId",
+      "title",
+      "tempo",
+      "key",
+      "timeSignature",
+      "sections",
+      "motifs",
+      "tracks"
+    ],
+    "title": "MusicIr",
+    "type": "object"
+  },
+  "IrPatchProposal": {
+    "$defs": {
+      "JsonPatchOp": {
+        "description": "A single RFC 6902 JSON Patch operation.",
+        "properties": {
+          "op": {
+            "enum": [
+              "add",
+              "remove",
+              "replace"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "pattern": "^/",
+            "title": "Path",
+            "type": "string"
+          },
+          "value": {
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "op",
+          "path"
+        ],
+        "title": "JsonPatchOp",
+        "type": "object"
+      },
+      "MusicalDiff": {
+        "description": "Human-readable summary of what a patch changes musically.",
+        "properties": {
+          "barsChanged": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Barschanged"
+          },
+          "notesAdded": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Notesadded",
+            "type": "integer"
+          },
+          "notesRemoved": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Notesremoved",
+            "type": "integer"
+          },
+          "preservedMotifs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Preservedmotifs",
+            "type": "array"
+          }
+        },
+        "title": "MusicalDiff",
+        "type": "object"
+      }
+    },
+    "description": "A structured patch proposal generated by an agent.",
+    "properties": {
+      "proposalId": {
+        "minLength": 1,
+        "title": "Proposalid",
+        "type": "string"
+      },
+      "projectId": {
+        "minLength": 1,
+        "title": "Projectid",
+        "type": "string"
+      },
+      "summary": {
+        "minLength": 1,
+        "title": "Summary",
+        "type": "string"
+      },
+      "patch": {
+        "items": {
+          "$ref": "#/$defs/JsonPatchOp"
+        },
+        "title": "Patch",
+        "type": "array"
+      },
+      "musicalDiff": {
+        "$ref": "#/$defs/MusicalDiff"
+      }
+    },
+    "required": [
+      "proposalId",
+      "projectId",
+      "summary",
+      "patch",
+      "musicalDiff"
+    ],
+    "title": "IrPatchProposal",
+    "type": "object"
+  },
+  "ProjectManifest": {
+    "description": "Project-level metadata.",
+    "properties": {
+      "projectId": {
+        "minLength": 1,
+        "title": "Projectid",
+        "type": "string"
+      },
+      "title": {
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "schemaVersion": {
+        "const": 1,
+        "title": "Schemaversion",
+        "type": "integer"
+      },
+      "appVersion": {
+        "minLength": 1,
+        "title": "Appversion",
+        "type": "string"
+      },
+      "createdAt": {
+        "title": "Createdat",
+        "type": "string"
+      },
+      "updatedAt": {
+        "title": "Updatedat",
+        "type": "string"
+      },
+      "owner": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Owner"
+      },
+      "team": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Team"
+      }
+    },
+    "required": [
+      "projectId",
+      "title",
+      "schemaVersion",
+      "appVersion",
+      "createdAt",
+      "updatedAt"
+    ],
+    "title": "ProjectManifest",
+    "type": "object"
+  },
+  "ProjectEvent": {
+    "$defs": {
+      "Actor": {
+        "description": "The entity that performed an action.",
+        "properties": {
+          "type": {
+            "enum": [
+              "local_user",
+              "mock_agent",
+              "codex",
+              "claude",
+              "worker"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "Actor",
+        "type": "object"
+      }
+    },
+    "description": "Immutable audit event appended to a project's event log.",
+    "properties": {
+      "eventId": {
+        "minLength": 1,
+        "title": "Eventid",
+        "type": "string"
+      },
+      "projectId": {
+        "minLength": 1,
+        "title": "Projectid",
+        "type": "string"
+      },
+      "actor": {
+        "$ref": "#/$defs/Actor"
+      },
+      "type": {
+        "enum": [
+          "project_created",
+          "project_opened",
+          "project_saved",
+          "patch_proposed",
+          "patch_previewed",
+          "patch_applied",
+          "patch_rejected",
+          "undo",
+          "redo",
+          "midi_imported",
+          "midi_exported",
+          "capability_checked",
+          "adapter_failed",
+          "project_recovered"
+        ],
+        "title": "Type",
+        "type": "string"
+      },
+      "timestamp": {
+        "title": "Timestamp",
+        "type": "string"
+      },
+      "payload": {
+        "additionalProperties": true,
+        "title": "Payload",
+        "type": "object"
+      }
+    },
+    "required": [
+      "eventId",
+      "projectId",
+      "actor",
+      "type",
+      "timestamp"
+    ],
+    "title": "ProjectEvent",
+    "type": "object"
+  }
+}

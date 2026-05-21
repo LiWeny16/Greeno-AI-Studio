@@ -1,3 +1,12 @@
+/**
+ * SOURCE OF TRUTH: src/workers/python/cc_music/music/ir.py (Pydantic)
+ *
+ * These Zod schemas are kept in sync manually for TypeScript type inference.
+ * Run `uv run python -m cc_music.music.export_schema` after Python schema changes
+ * and verify with `uv run pytest tests/test_schema_consistency.py -v`.
+ *
+ * CI enforces: TS fixtures must validate against Python Pydantic models.
+ */
 import { z } from "zod";
 export const BarRangeSchema = z.tuple([z.number().int().positive(), z.number().int().positive()]).refine(([start, end]) => start <= end, "bar range start must be <= end");
 export const NoteSchema = z.object({

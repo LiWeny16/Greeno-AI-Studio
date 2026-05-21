@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Rect, Text as KonvaText, Line, Group } from "react-konva";
 import Konva from "konva";
-import { sampleMusicIr } from "@cc-music/music-ir";
-import type { Note } from "@cc-music/music-ir";
 import { useEditorStore } from "../../stores/useEditorStore";
+import { usePianoRollNotes } from "./usePianoRollNotes";
 import { testIds } from "../../testids";
 import {
   PIANO_ROLL_MIN_HEIGHT,
@@ -25,25 +24,6 @@ import {
   yToMidi,
   snapToGrid,
 } from "./pianoRollHelpers";
-
-// ---------------------------------------------------------------------------
-// Local note type (Note + generated id + motifId)
-// ---------------------------------------------------------------------------
-
-interface PianoRollNote extends Note {
-  id: string;
-  motifId: string;
-}
-
-function buildInitialNotes(): PianoRollNote[] {
-  return sampleMusicIr.motifs.flatMap((motif) =>
-    motif.notes.map((note, i) => ({
-      ...note,
-      id: `${motif.id}-${i}`,
-      motifId: motif.id,
-    })),
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Derived render data for a single note
@@ -70,8 +50,16 @@ export function PianoRoll() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [stageWidth, setStageWidth] = useState(800);
 
-  // -- Local working copy of notes (edits are local UI state) --
-  const [notes, setNotes] = useState<PianoRollNote[]>(buildInitialNotes);
+  // -- Notes via TanStack Query (online) or local fallback (offline) --
+  const { notes, _actionsRef, deleteNotes: hookDeleteNotes, isPending } =
+    usePianoRollNotes();
+
+  // Stable ref for batch deletes so the keydown listener doesn't churn.
+  const deleteNotesRef = useRef(hookDeleteNotes);
+  deleteNotesRef.current = hookDeleteNotes;
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  void isPending; // consumed by future UI feedback
 
   // -- Store selectors --
   const selectedNoteIds = useEditorStore((s) => s.selectedNoteIds);
@@ -121,7 +109,7 @@ export function PianoRoll() {
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
         const selected = useEditorStore.getState().selectedNoteIds;
         if (selected.length > 0) {
-          setNotes((prev) => prev.filter((n) => !selected.includes(n.id)));
+          deleteNotesRef.current(selected);
           setSelectedNoteIds([]);
         }
       }
@@ -147,16 +135,13 @@ export function PianoRoll() {
       const midi = yToMidi(pos.y);
       const pitch = midiToPitch(midi);
 
-      const newNote: PianoRollNote = {
-        id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      _actionsRef.current.addNote({
         pitch,
         startBeat: Math.max(0, snappedBeat),
         durationBeats: DEFAULT_DURATION,
         velocity: DEFAULT_VELOCITY,
         motifId: "manual",
-      };
-
-      setNotes((prev) => [...prev, newNote]);
+      });
     },
     [beatWidth],
   );
@@ -183,7 +168,7 @@ export function PianoRoll() {
   const handleNoteContextMenu = useCallback(
     (noteId: string, e: Konva.KonvaEventObject<PointerEvent>) => {
       e.evt.preventDefault();
-      setNotes((prev) => prev.filter((n) => n.id !== noteId));
+      _actionsRef.current.deleteNote(noteId);
       const store = useEditorStore.getState();
       if (store.selectedNoteIds.includes(noteId)) {
         store.removeSelectedNoteId(noteId);
@@ -198,7 +183,7 @@ export function PianoRoll() {
       e.evt.preventDefault();
       const selected = useEditorStore.getState().selectedNoteIds;
       if (selected.length > 0) {
-        setNotes((prev) => prev.filter((n) => !selected.includes(n.id)));
+        _actionsRef.current.deleteNotes(selected);
         setSelectedNoteIds([]);
       }
     },
@@ -257,13 +242,7 @@ export function PianoRoll() {
       const newMidi = yToMidi(node.y());
       const newPitch = midiToPitch(newMidi);
 
-      setNotes((prev) =>
-        prev.map((n) =>
-          n.id === noteId
-            ? { ...n, startBeat: newStartBeat, pitch: newPitch }
-            : n,
-        ),
-      );
+      _actionsRef.current.moveNote(noteId, newPitch, newStartBeat);
 
       dragRef.current = null;
     },
@@ -318,11 +297,7 @@ export function PianoRoll() {
         snapToGrid(rawDuration, GRID_SNAP),
       );
 
-      setNotes((prev) =>
-        prev.map((n) =>
-          n.id === noteId ? { ...n, durationBeats: newDuration } : n,
-        ),
-      );
+      _actionsRef.current.updateNote(noteId, { durationBeats: newDuration });
 
       dragRef.current = null;
     },

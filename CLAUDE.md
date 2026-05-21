@@ -30,6 +30,9 @@
 ## Schema First
 
 - Any cross-process or stored data change starts with a schema.
+- Python Pydantic (src/workers/python/cc_music/music/ir.py) is the single source of truth for all data schemas.
+- TypeScript Zod schemas mirror Pydantic. After any Pydantic change, run `uv run python -m cc_music.music.export_schema`.
+- CI validates TS fixtures against Python schemas.
 - Update schema, fixtures, validation tests, and docs together.
 - Reject unvalidated AI, worker, file, or network input.
 - Never let agent text directly mutate project state.

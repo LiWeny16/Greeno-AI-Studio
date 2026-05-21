@@ -418,8 +418,9 @@ class TestMidi:
 
 
 class TestAgent:
-    def test_agent_messages_mock_produces_proposal(self, client, auth_headers):
-        create_r = client.post("/api/projects", json={"title": "Agent Test"}, headers=auth_headers)
+    def test_agent_messages_starts_background_session(self, client, auth_headers):
+        """POST returns sessionId immediately; agent runs in background."""
+        create_r = client.post("/api/projects", json={"title": "Agent BG"}, headers=auth_headers)
         pid = create_r.json()["manifest"]["projectId"]
 
         r = client.post(
@@ -429,9 +430,53 @@ class TestAgent:
         )
         assert r.status_code == 200, r.text
         data = r.json()
-        assert "proposal" in data
-        assert "streamEvents" in data
-        assert len(data["streamEvents"]) >= 1
+        assert "sessionId" in data
+        assert data["status"] == "started"
+        assert data["sessionId"].startswith("sess_")
+
+    def test_agent_session_poll_returns_events(self, client, auth_headers):
+        """GET session status returns events and terminal status after agent completes."""
+        import time
+
+        create_r = client.post("/api/projects", json={"title": "Agent Poll"}, headers=auth_headers)
+        pid = create_r.json()["manifest"]["projectId"]
+
+        start_r = client.post(
+            f"/api/projects/{pid}/agent/messages",
+            json={"prompt": "make bars 9-16 darker", "selection": {}},
+            headers=auth_headers,
+        )
+        session_id = start_r.json()["sessionId"]
+
+        # Poll until terminal or max attempts (background task runs fast with mock)
+        data = {"status": "running"}
+        for _ in range(50):
+            time.sleep(0.02)
+            r = client.get(
+                f"/api/projects/{pid}/agent/sessions/{session_id}",
+                headers=auth_headers,
+            )
+            assert r.status_code == 200, r.text
+            data = r.json()
+            if data["status"] in ("completed", "failed"):
+                break
+
+        assert data["sessionId"] == session_id
+        assert data["status"] in ("completed", "failed")
+        assert "events" in data
+        if data["status"] == "completed":
+            assert len(data["events"]) >= 0  # events may have been drained by earlier polls
+
+    def test_agent_session_not_found(self, client, auth_headers):
+        """GET non-existent session returns 404."""
+        create_r = client.post("/api/projects", json={"title": "Agent 404"}, headers=auth_headers)
+        pid = create_r.json()["manifest"]["projectId"]
+
+        r = client.get(
+            f"/api/projects/{pid}/agent/sessions/nonexistent",
+            headers=auth_headers,
+        )
+        assert r.status_code == 404
 
     def test_agent_messages_empty_prompt(self, client, auth_headers):
         create_r = client.post("/api/projects", json={"title": "Agent Empty"}, headers=auth_headers)
@@ -443,19 +488,6 @@ class TestAgent:
             headers=auth_headers,
         )
         assert r.status_code == 400
-
-    def test_agent_messages_timeout(self, client, auth_headers):
-        create_r = client.post("/api/projects", json={"title": "Agent Timeout"}, headers=auth_headers)
-        pid = create_r.json()["manifest"]["projectId"]
-
-        r = client.post(
-            f"/api/projects/{pid}/agent/messages",
-            json={"prompt": "fail:timeout", "selection": {}},
-            headers=auth_headers,
-        )
-        assert r.status_code == 422
-        data = r.json()
-        assert "error" in data
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ import { Inspector } from "../features/inspector/Inspector";
 import { AgentPanel } from "../features/agent-panel/AgentPanel";
 import { Transport } from "../features/transport/Transport";
 import { QueryProvider } from "../lib/api";
-import { useProject } from "../lib/api";
+import { useProject, useUpdateProjectIr } from "../lib/api";
 
 export function App() {
   const activeEditorTab = useEditorStore((s) => s.activeEditorTab);
@@ -54,8 +54,11 @@ export function App() {
   const toggleBottomCollapsed = usePanelStore((s) => s.toggleBottomCollapsed);
   const panelSizes = usePanelStore((s) => s.panelSizes);
 
-  const { data: projectIr } = useProject("demo");
+  const { data: projectIr, isSuccess: isLive } = useProject("demo");
   const musicIr = projectIr ?? sampleMusicIr;
+  const mode = isLive ? ("live" as const) : ("offline" as const);
+
+  const saveMutation = useUpdateProjectIr("demo");
 
   const firstSection = musicIr.sections[0];
   const barCount = firstSection ? barRangeLength(firstSection.barRange) : 0;
@@ -112,9 +115,15 @@ export function App() {
                 {musicIr.projectId}
               </span>
             </div>
-            <Badge variant="success" className="ml-1">
-              Saved
-            </Badge>
+            {mode === "live" ? (
+              <Badge variant="success" className="ml-1">
+                Live
+              </Badge>
+            ) : (
+              <Badge variant="warning" className="ml-1">
+                Offline
+              </Badge>
+            )}
           </div>
 
           <Separator orientation="vertical" className="mx-1 h-6" />
@@ -165,7 +174,13 @@ export function App() {
 
           {/* Right actions */}
           <div className="flex items-center gap-1">
-            <IconButton label="Save" tooltip="Save project" size="sm" variant="ghost">
+            <IconButton
+              label="Save"
+              tooltip="Save project"
+              size="sm"
+              variant="ghost"
+              onClick={() => saveMutation.mutate(musicIr)}
+            >
               <Save className="h-4 w-4" />
             </IconButton>
             <IconButton label="Open project" tooltip="Open project" size="sm" variant="ghost">

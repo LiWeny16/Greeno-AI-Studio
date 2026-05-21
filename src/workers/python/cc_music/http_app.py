@@ -31,6 +31,7 @@ Security:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -42,7 +43,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -964,12 +965,19 @@ _AGENT_TOOLS: list = [
     _AgentTool("analyze", "General analysis tool."),
 ]
 
+# In-memory agent session store: session_id -> {status, project_id, events, result}
+_agent_sessions: dict[str, dict[str, Any]] = {}
+
 
 @app.post("/api/projects/{project_id}/agent/messages")
-async def agent_messages(project_id: str, request: Request):
-    """Run the agent ReAct loop with MockBackend and return a proposal."""
+async def agent_messages(project_id: str, request: Request, background_tasks: BackgroundTasks):
+    """Start agent in background, return session ID immediately.
+
+    The agent ReAct loop runs as a FastAPI background task so it does not
+    block the event loop.  Clients poll GET /agent/sessions/{session_id}
+    or connect via WebSocket to receive streaming events.
+    """
     _load_manifest(project_id)
-    ir = _load_ir(project_id)
 
     try:
         body = await request.json()
@@ -980,6 +988,53 @@ async def agent_messages(project_id: str, request: Request):
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
 
+    session_id = _uid("sess_")
+
+    _agent_sessions[session_id] = {
+        "status": "running",
+        "project_id": project_id,
+        "events": [],
+    }
+
+    background_tasks.add_task(_run_agent, session_id, project_id, body)
+
+    return {"sessionId": session_id, "status": "started"}
+
+
+@app.get("/api/projects/{project_id}/agent/sessions/{session_id}")
+async def agent_session_status(project_id: str, session_id: str):
+    """Poll agent session status + events.
+
+    Events are drained on each poll so the client never re-reads stale data.
+    """
+    _load_manifest(project_id)
+    session = _agent_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    events = session["events"][:]
+    session["events"] = []  # drain
+    return {"sessionId": session_id, "status": session["status"], "events": events}
+
+
+async def _run_agent(session_id: str, project_id: str, body: dict) -> None:
+    """Background task: run the ReAct loop and collect events into the session store.
+
+    This function is scheduled via BackgroundTasks.add_task() and never blocks
+    the HTTP response.  All errors are captured and stored in the session so
+    clients can retrieve them via polling or WebSocket.
+    """
+    session = _agent_sessions.get(session_id)
+    if not session:
+        return
+
+    try:
+        ir = _load_ir(project_id)
+    except Exception:
+        session["status"] = "failed"
+        session["result"] = {"error": "Project IR not found"}
+        return
+
+    prompt = body["prompt"]
     selection = body.get("selection") or {}
     snapshot = ir.model_dump(mode="json")
 
@@ -992,27 +1047,20 @@ async def agent_messages(project_id: str, request: Request):
 
     backend: LlmBackend = MockBackend.from_prompt(prompt)
 
-    stream_events: list[dict] = []
-
     async def on_event(event: dict) -> None:
-        stream_events.append(event)
+        session["events"].append(event)
 
     result = await react_loop(state, _AGENT_TOOLS, backend, on_event)
 
     if not result.get("success") or not result.get("proposal"):
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": result.get("error", "Agent did not produce a proposal"),
-                "streamEvents": stream_events,
-            },
-        )
+        session["status"] = "failed"
+        session["result"] = {"error": result.get("error", "Agent did not produce a proposal")}
+        return
 
     proposal_raw = result["proposal"]
     proposal_id = _uid("patch_")
     summary = prompt[:200]
 
-    # Build a valid IrPatchProposal
     try:
         proposal = IrPatchProposal(
             proposalId=proposal_id,
@@ -1024,26 +1072,22 @@ async def agent_messages(project_id: str, request: Request):
                 {"notesAdded": 0, "notesRemoved": 0, "preservedMotifs": []},
             ),
         )
-    except Exception as exc:
-        return JSONResponse(
-            status_code=422,
-            content={"error": f"Invalid proposal from agent: {exc}", "streamEvents": stream_events},
+
+        event = ProjectEvent(
+            eventId=_uid("evt_"),
+            projectId=project_id,
+            actor={"type": "mock_agent"},
+            type="patch_proposed",
+            timestamp=_timestamp(),
+            payload={"proposalId": proposal_id},
         )
+        _append_event(project_id, event)
 
-    event = ProjectEvent(
-        eventId=_uid("evt_"),
-        projectId=project_id,
-        actor={"type": "mock_agent"},
-        type="patch_proposed",
-        timestamp=_timestamp(),
-        payload={"proposalId": proposal_id},
-    )
-    _append_event(project_id, event)
-
-    return {
-        "proposal": proposal.model_dump(mode="json"),
-        "streamEvents": stream_events,
-    }
+        session["status"] = "completed"
+        session["result"] = {"proposal": proposal.model_dump(mode="json")}
+    except Exception as exc:
+        session["status"] = "failed"
+        session["result"] = {"error": f"Invalid proposal from agent: {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1052,11 +1096,13 @@ async def agent_messages(project_id: str, request: Request):
 
 
 @app.websocket("/ws/projects/{project_id}/agent/{session_id}")
-async def ws_agent(websocket: WebSocket, project_id: str, session_id: str):
-    """WebSocket endpoint for streaming agent events.
+async def agent_websocket(websocket: WebSocket, project_id: str, session_id: str):
+    """WebSocket endpoint for streaming agent events from an existing session.
 
-    Client connects, sends a JSON message with {prompt, selection?}, and
-    receives stream events + final proposal over the WebSocket.
+    The session must already exist (created via POST /agent/messages).
+    This endpoint polls the session's event buffer at ~300ms intervals and
+    pushes each event to the client.  When the session reaches a terminal
+    state the final result is sent and the connection is closed.
     """
     # Origin check
     origin = websocket.headers.get("origin", "")
@@ -1073,84 +1119,51 @@ async def ws_agent(websocket: WebSocket, project_id: str, session_id: str):
 
     await websocket.accept()
 
+    session = _agent_sessions.get(session_id)
+    if not session:
+        await websocket.close(code=4004, reason="Session not found")
+        return
+
     try:
-        # Read the initial agent request
-        data = await websocket.receive_json()
-        prompt = (data.get("prompt") or "").strip()
-        if not prompt:
-            await websocket.send_json(
-                {"type": "error", "data": {"code": "invalid_request", "message": "prompt is required"}}
-            )
-            await websocket.close()
-            return
-
-        # Verify project exists
-        _load_manifest(project_id)
-        ir = _load_ir(project_id)
-
-        selection = data.get("selection") or {}
-        snapshot = ir.model_dump(mode="json")
-
-        state = AgentState(
-            snapshot=snapshot,
-            user_prompt=prompt,
-            selection=selection,
-            max_iterations=10,
-        )
-
-        backend: LlmBackend = MockBackend.from_prompt(prompt)
-
-        async def ws_on_event(event: dict) -> None:
-            """Forward each stream event to the WebSocket client."""
-            try:
+        # Poll session events at 300ms intervals while the agent runs
+        while session["status"] == "running":
+            events = session["events"][:]
+            session["events"] = []
+            for event in events:
                 await websocket.send_json({"type": "stream_event", "data": event})
-            except Exception:
-                pass  # client may have disconnected
+            await asyncio.sleep(0.3)
 
-        result = await react_loop(state, _AGENT_TOOLS, backend, ws_on_event)
+        # Drain any remaining events before sending the final result
+        remaining = session["events"][:]
+        session["events"] = []
+        for event in remaining:
+            await websocket.send_json({"type": "stream_event", "data": event})
 
-        if result.get("success") and result.get("proposal"):
-            proposal_id = _uid("patch_")
-            proposal_raw = result["proposal"]
-            try:
-                proposal = IrPatchProposal(
-                    proposalId=proposal_id,
-                    projectId=project_id,
-                    summary=prompt[:200],
-                    patch=proposal_raw.get("patch", []),
-                    musicalDiff=proposal_raw.get(
-                        "musicalDiff",
-                        {"notesAdded": 0, "notesRemoved": 0, "preservedMotifs": []},
-                    ),
-                )
-                await websocket.send_json(
-                    {
-                        "type": "done",
-                        "data": {"proposal": proposal.model_dump(mode="json")},
-                    }
-                )
-            except Exception as exc:
-                await websocket.send_json(
-                    {"type": "error", "data": {"code": "invalid_proposal", "message": str(exc)}}
-                )
+        # Send final result
+        result = session.get("result")
+        if result and "proposal" in result:
+            await websocket.send_json({"type": "done", "data": result})
         else:
             await websocket.send_json(
                 {
                     "type": "error",
                     "data": {
-                        "code": "max_iterations",
-                        "message": result.get("error", "Agent did not produce a proposal"),
+                        "code": "agent_failed",
+                        "message": (
+                            result.get("error", "Agent did not produce a proposal")
+                            if result
+                            else "No result"
+                        ),
                     },
                 }
             )
-
     except WebSocketDisconnect:
-        pass  # client disconnected
-    except Exception as exc:
+        pass  # client disconnected gracefully
+    except Exception:
+        pass  # connection may have dropped mid-stream
+    finally:
         try:
-            await websocket.send_json(
-                {"type": "error", "data": {"code": "internal", "message": str(exc)}}
-            )
+            await websocket.close()
         except Exception:
             pass
 

@@ -87,16 +87,7 @@ export function AgentPanel() {
   const hasErrorMessages = messages.some((m) => m.role === "error");
   const hasMessages = messages.length > 0;
 
-  const handleSend = useCallback(() => {
-    const prompt = draftPrompt.trim();
-    if (!prompt || isStreaming) return;
-
-    setStreamError(null);
-    setPreviewPatchId(null);
-    clearMessages();
-    setStreamVisible(true);
-    setStreaming(true);
-
+  const fallbackToSimulation = useCallback(() => {
     const cancel = simulateAgentStream((msg) => {
       addMessage({ ...msg, timestamp: formatTimestamp() } as AgentMessage);
 
@@ -108,6 +99,98 @@ export function AgentPanel() {
     });
 
     cancelRef.current = cancel;
+  }, [addMessage, setStreaming, setStreamVisible, setPreviewPatchId]);
+
+  const handleSend = useCallback(() => {
+    const prompt = draftPrompt.trim();
+    if (!prompt || isStreaming) return;
+
+    setStreamError(null);
+    setPreviewPatchId(null);
+    clearMessages();
+    setStreamVisible(true);
+    setStreaming(true);
+
+    const PROXY_HOST =
+      import.meta.env.VITE_BACKEND_HOST ?? "localhost:8787";
+
+    // Try real backend first — fall back to local simulation on any failure
+    fetch(`http://${PROXY_HOST}/api/projects/demo/agent/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, selection: {}, snapshotId: "latest" }),
+    })
+      .then((resp) => {
+        if (!resp.ok) {
+          fallbackToSimulation();
+          return;
+        }
+        resp
+          .json()
+          .then(({ sessionId }: { sessionId: string }) => {
+            const wsProtocol = PROXY_HOST.startsWith("https") ? "wss" : "ws";
+            const wsHost = PROXY_HOST.replace(/^https?:\/\//, "");
+            const token = localStorage.getItem("cc-music-token") ?? "";
+            const params = new URLSearchParams();
+            if (token) params.set("token", token);
+            const qs = params.toString();
+            const wsUrl = `${wsProtocol}://${wsHost}/ws/projects/demo/agent/${sessionId}${qs ? `?${qs}` : ""}`;
+
+            const ws = new WebSocket(wsUrl);
+            ws.onmessage = (e) => {
+              const event = JSON.parse(e.data);
+              if (event.type === "done") {
+                setStreaming(false);
+                setStreamVisible(false);
+                if (event.data?.proposal) {
+                  addMessage({
+                    role: "proposal",
+                    text: "Proposal ready",
+                    proposal: {
+                      id: event.data.proposal.proposalId,
+                      summary: event.data.proposal.summary ?? "AI proposal",
+                      notesAdded:
+                        event.data.proposal.musicalDiff?.notesAdded ?? 0,
+                      notesRemoved:
+                        event.data.proposal.musicalDiff?.notesRemoved ?? 0,
+                      barsChanged:
+                        event.data.proposal.musicalDiff?.barsChanged?.length ??
+                        0,
+                      preservedMotifs:
+                        event.data.proposal.musicalDiff?.preservedMotifs
+                          ?.length ?? 0,
+                    },
+                    timestamp: formatTimestamp(),
+                  } as AgentMessage);
+                  setPreviewPatchId(event.data.proposal.proposalId);
+                }
+                ws.close();
+              } else if (event.type === "stream_event") {
+                const d = event.data;
+                addMessage({
+                  role: d.type === "tool_result" ? "tool" : "agent",
+                  text: d.data?.text ?? JSON.stringify(d.data ?? d),
+                  timestamp: formatTimestamp(),
+                } as AgentMessage);
+              } else if (event.type === "error") {
+                setStreamError(
+                  event.data?.message ?? event.data?.data?.message ?? "Agent error",
+                );
+                setStreaming(false);
+                ws.close();
+              }
+            };
+            ws.onerror = () => {
+              fallbackToSimulation();
+            };
+          })
+          .catch(() => {
+            fallbackToSimulation();
+          });
+      })
+      .catch(() => {
+        fallbackToSimulation();
+      });
   }, [
     draftPrompt,
     isStreaming,
@@ -116,6 +199,7 @@ export function AgentPanel() {
     setStreaming,
     addMessage,
     setPreviewPatchId,
+    fallbackToSimulation,
   ]);
 
   const handleStop = useCallback(() => {
