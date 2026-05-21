@@ -7,6 +7,7 @@ import { registerProjectRoutes } from "./api/projects";
 import { registerPatchRoutes } from "./api/patches";
 import { registerJobRoutes } from "./api/jobs";
 import { registerMidiRoutes } from "./api/midi";
+import { registerAgentRoutes } from "./api/agent";
 import { assertBrowserOrigin } from "./security/origin";
 
 export async function createServer(config: BridgeConfig) {
@@ -29,6 +30,7 @@ export async function createServer(config: BridgeConfig) {
   await registerPatchRoutes(app, config);
   await registerJobRoutes(app, config);
   await registerMidiRoutes(app, config);
+  await registerAgentRoutes(app, config);
 
   return app;
 }
