@@ -5,64 +5,26 @@ import { sampleMusicIr } from "@cc-music/music-ir";
 import type { Note } from "@cc-music/music-ir";
 import { useEditorStore } from "../../stores/useEditorStore";
 import { testIds } from "../../testids";
-
-// ---------------------------------------------------------------------------
-// Layout constants
-// ---------------------------------------------------------------------------
-
-const PIANO_ROLL_MIN_HEIGHT = 360;
-const BASE_BEAT_WIDTH = 40;
-const ROW_HEIGHT = 20;
-const MIN_PITCH = 48; // C3
-const MAX_PITCH = 83; // B5
-const NOTE_CORNER_RADIUS = 3;
-const LEFT_MARGIN = 56;
-const DEFAULT_DURATION = 0.5;
-const DEFAULT_VELOCITY = 0.8;
-const MIN_DURATION = 0.0625; // 1/16 note
-const GRID_SNAP = 0.25; // snap to 16th note grid
-const RESIZE_HANDLE_WIDTH = 6;
-
-// ---------------------------------------------------------------------------
-// Pitch helpers
-// ---------------------------------------------------------------------------
-
-const NOTE_TO_SEMITONE: Record<string, number> = {
-  C: 0, "C#": 1, Db: 1, D: 2, "D#": 3, Eb: 3, E: 4, F: 5,
-  "F#": 6, Gb: 6, G: 7, "G#": 8, Ab: 8, A: 9, "A#": 10, Bb: 10, B: 11,
-};
-
-function pitchToMidi(pitch: string): number {
-  const match = pitch.match(/^([A-G][#b]?)(\d+)$/);
-  if (!match) throw new Error(`Invalid pitch string: "${pitch}"`);
-  const semitone = NOTE_TO_SEMITONE[match[1]!];
-  if (semitone === undefined) throw new Error(`Unknown note: "${match[1]}"`);
-  return (parseInt(match[2]!, 10) + 1) * 12 + semitone;
-}
-
-function midiToPitch(midi: number): string {
-  const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-  const octave = Math.floor(midi / 12) - 1;
-  return `${names[midi % 12]!}${octave}`;
-}
-
-function isBlackKey(midi: number): boolean {
-  return [1, 3, 6, 8, 10].includes(midi % 12);
-}
-
-function pitchToY(midi: number): number {
-  return (MAX_PITCH - midi) * ROW_HEIGHT;
-}
-
-function yToMidi(y: number): number {
-  const totalRows = MAX_PITCH - MIN_PITCH + 1;
-  const row = Math.round(y / ROW_HEIGHT);
-  return MAX_PITCH - Math.max(0, Math.min(totalRows - 1, row));
-}
-
-function snapToGrid(value: number, snap: number): number {
-  return Math.round(value / snap) * snap;
-}
+import {
+  PIANO_ROLL_MIN_HEIGHT,
+  BASE_BEAT_WIDTH,
+  ROW_HEIGHT,
+  MIN_PITCH,
+  MAX_PITCH,
+  NOTE_CORNER_RADIUS,
+  LEFT_MARGIN,
+  DEFAULT_DURATION,
+  DEFAULT_VELOCITY,
+  MIN_DURATION,
+  GRID_SNAP,
+  RESIZE_HANDLE_WIDTH,
+  pitchToMidi,
+  midiToPitch,
+  isBlackKey,
+  pitchToY,
+  yToMidi,
+  snapToGrid,
+} from "./pianoRollHelpers";
 
 // ---------------------------------------------------------------------------
 // Local note type (Note + generated id + motifId)

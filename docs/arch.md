@@ -965,8 +965,11 @@ Backend app dependencies:
 
 ```text
 fastify
+@fastify/multipart
+@fastify/static
 @fastify/websocket
 fastify-type-provider-zod
+pino
 zod
 better-sqlite3
 execa

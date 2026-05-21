@@ -1,3 +1,11 @@
+/**
+ * NOTE: These transforms are for UI preview/display purposes only.
+ * Canonical music transforms live in the Python engine:
+ * src/workers/python/cc_music/music/transforms.py
+ *
+ * The mutation pipeline goes through:
+ * Browser → Bridge → Python Engine → IrPatchProposal → Validate → Apply
+ */
 import type { MusicIr } from "@cc-music/music-ir";
 type Motif = MusicIr["motifs"][number];
 export declare function countProjectNotes(project: MusicIr): number;

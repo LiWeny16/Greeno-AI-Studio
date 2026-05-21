@@ -446,6 +446,7 @@ Done:
 - Create/edit/delete notes.
 - Motif save/reuse.
 - Basic transforms: transpose, repeat, inversion, rhythm stretch/compress.
+- Python engine: transpose, quantize, motif variation, MIDI import/export.
 - MIDI import/export through `@tonejs/midi`.
 
 Done:

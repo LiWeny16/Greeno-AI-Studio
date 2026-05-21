@@ -9,7 +9,7 @@ export const AgentSelectionSchema = z.object({
 
 export const AgentRequestSchema = z.object({
   requestId: z.string().min(1),
-  agent: z.enum(["mock", "codex", "claude"]),
+  agent: z.enum(["mock", "codex", "claude", "openai_compat"]),
   mode: z.literal("ir_patch"),
   prompt: z.string().min(1),
   projectId: z.string().min(1),

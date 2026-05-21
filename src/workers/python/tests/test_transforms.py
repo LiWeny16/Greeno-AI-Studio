@@ -115,13 +115,23 @@ class TestMidiToPitch:
 class TestPitchMidiRoundtrip:
     @pytest.mark.parametrize(
         "pitch",
-        ["C4", "C#4", "Db4", "D4", "Eb4", "E4", "F4", "F#4", "G4", "Ab4", "A4", "Bb4", "B4"],
+        ["C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4"],
     )
-    def test_roundtrip(self, pitch: str) -> None:
+    def test_roundtrip_sharps(self, pitch: str) -> None:
+        """Sharp-only roundtrip must be identity (midi_to_pitch uses sharps)."""
         assert midi_to_pitch(pitch_to_midi(pitch)) == pitch
+
+    def test_flat_pitches_produce_correct_midi(self) -> None:
+        """Flat names parse to the same MIDI as their enharmonic sharp."""
+        assert pitch_to_midi("Db4") == 61  # same as C#4
+        assert pitch_to_midi("Eb4") == 63  # same as D#4
+        assert pitch_to_midi("Gb4") == 66  # same as F#4
+        assert pitch_to_midi("Ab4") == 68  # same as G#4
+        assert pitch_to_midi("Bb4") == 70  # same as A#4
 
     @pytest.mark.parametrize("midi", [0, 12, 60, 72, 127])
     def test_roundtrip_midi(self, midi: int) -> None:
+        """MIDI → pitch → MIDI is always identity."""
         assert pitch_to_midi(midi_to_pitch(midi)) == midi
 
 
