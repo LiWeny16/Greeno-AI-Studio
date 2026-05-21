@@ -21,25 +21,22 @@ from pathlib import Path
 import pytest
 
 
+TEST_TOKEN = "test-token-12345"
+
+
 @pytest.fixture
 def tmp_project_root():
-    """Create a temporary project root and point CC_MUSIC_PROJECT_ROOT at it."""
+    """Create a temporary project root + fix local token so the app uses a known value."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        old = os.environ.get("CC_MUSIC_PROJECT_ROOT")
-        os.environ["CC_MUSIC_PROJECT_ROOT"] = tmpdir
-        try:
-            yield Path(tmpdir)
-        finally:
-            if old is not None:
-                os.environ["CC_MUSIC_PROJECT_ROOT"] = old
-            else:
-                os.environ.pop("CC_MUSIC_PROJECT_ROOT", None)
+        _set_env("CC_MUSIC_PROJECT_ROOT", tmpdir)
+        _set_env("CC_MUSIC_LOCAL_TOKEN", TEST_TOKEN)
+        yield Path(tmpdir)
 
 
 @pytest.fixture
 def client(tmp_project_root):
     """Return a TestClient, re-importing the app module for each test to pick
-    up the temporary PROJECT_ROOT."""
+    up the temporary PROJECT_ROOT and LOCAL_TOKEN."""
     import importlib
     import cc_music.http_app as app_module
 
@@ -55,8 +52,13 @@ def auth_headers():
     """Headers for an authorized request from a valid origin."""
     return {
         "Origin": "http://localhost:5173",
-        "X-Local-Token": "test-token-12345",
+        "X-Local-Token": TEST_TOKEN,
     }
+
+
+def _set_env(key: str, value: str):
+    import os as _os
+    _os.environ[key] = value
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +77,11 @@ class TestHealth:
 
     def test_capabilities_requires_auth(self, client, auth_headers):
         r = client.get("/api/system/capabilities", headers=auth_headers)
+        if r.status_code != 200:
+            print(f"\nRESPONSE BODY: {r.text}")
+            print(f"RESPONSE HEADERS: {dict(r.headers)}")
+            import cc_music.http_app as app_module
+            print(f"LOCAL_TOKEN: {app_module.LOCAL_TOKEN}")
         assert r.status_code == 200
         data = r.json()
         assert "codex" in data
