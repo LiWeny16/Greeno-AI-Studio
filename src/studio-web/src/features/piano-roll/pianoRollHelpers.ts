@@ -31,7 +31,7 @@ export const RESIZE_HANDLE_WIDTH = 6;
 // ---------------------------------------------------------------------------
 
 export function pitchToMidi(pitch: string): number {
-  const match = pitch.match(/^([A-G][#b]?)(\d+)$/);
+  const match = pitch.match(/^([A-G][#b]?)(-?\d+)$/);
   if (!match) throw new Error(`Invalid pitch string: "${pitch}"`);
   const semitone = NOTE_TO_SEMITONE[match[1]!];
   if (semitone === undefined) throw new Error(`Unknown note: "${match[1]}"`);

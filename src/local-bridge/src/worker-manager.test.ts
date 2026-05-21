@@ -6,20 +6,20 @@ import { EventEmitter } from "node:events";
 // Mock execa
 // ---------------------------------------------------------------------------
 
-const mockProcDefaults = {
-  stdin: new PassThrough(),
-  stdout: new PassThrough(),
-  stderr: new PassThrough(),
-  kill: vi.fn(),
-  pid: 99999,
-};
-
 let mockProc: ReturnType<typeof createMockProc>;
 
 function createMockProc() {
   const ee = new EventEmitter();
+
+  // Buffer for stdin writes so we can inspect them
+  const stdin = new PassThrough();
+  let stdinBuffer = "";
+  stdin.on("data", (chunk: Buffer) => {
+    stdinBuffer += chunk.toString();
+  });
+
   const proc = Object.assign(ee, {
-    stdin: new PassThrough(),
+    stdin,
     stdout: new PassThrough(),
     stderr: new PassThrough(),
     kill: vi.fn((_signal?: string) => {
@@ -29,7 +29,10 @@ function createMockProc() {
     pid: 99999,
     exitCode: null as number | null,
     on: ee.on.bind(ee),
+    once: ee.once.bind(ee),
     emit: ee.emit.bind(ee),
+    // expose the captured stdin for assertions
+    _stdinBuffer: () => stdinBuffer,
   });
   return proc;
 }
@@ -50,8 +53,9 @@ import type { WorkerStreamEvent, PythonWorker } from "./worker-manager";
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Standard test config with pythonWorker enabled
-function makeConfig(overrides?: Partial<BridgeConfig["pythonWorker"]>): BridgeConfig {
+function makeConfig(
+  overrides?: Partial<BridgeConfig["pythonWorker"]>,
+): BridgeConfig {
   return {
     agentAdapter: "mock",
     host: "127.0.0.1",
@@ -73,6 +77,11 @@ function writeFromPython(line: Record<string, unknown>): void {
   mockProc.stdout.write(JSON.stringify(line) + "\n");
 }
 
+/** Write a raw string to the mock subprocess stderr. */
+function writeToStderr(text: string): void {
+  mockProc.stderr.write(text + "\n");
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -87,29 +96,35 @@ describe("spawnPythonEngine", () => {
   });
 
   afterEach(() => {
-    // Clean up any lingering worker
-    if (worker && worker.running) {
+    // Clean up any lingering worker that is still running.
+    // Must avoid `kill()` re-emitting "exit" and triggering rejectAllPending
+    // for already-settled promises, so we remove the default kill behaviour.
+    if (worker?.running) {
+      // Replace kill with a silent version that only sets exitCode
+      const origKill = mockProc.kill;
+      mockProc.kill = vi.fn(() => {
+        mockProc.exitCode = 0;
+        mockProc.emit("exit", 0, null);
+      });
       worker.kill();
     }
+    // Reset worker reference so stale processes are not reused
+    worker = undefined as unknown as PythonWorker;
   });
 
   // -- Spawn ---------------------------------------------------------------
 
   it("lazily spawns the Python subprocess on first request", () => {
     worker = spawnPythonEngine(config);
-    // Before any request, execa should not have been called
-    // (We skip the import check because mock module is already loaded)
     expect(worker.running).toBe(false);
   });
 
   it("sets running = true after first request triggers spawn", async () => {
     worker = spawnPythonEngine(config);
 
-    // Initiate a request, then immediately respond
     const reqPromise = worker.request("ping");
     expect(worker.running).toBe(true);
 
-    // Simulate response from Python
     writeFromPython({ type: "result", id: "req_001", data: "pong" });
 
     const result = await reqPromise;
@@ -124,12 +139,11 @@ describe("spawnPythonEngine", () => {
 
     const reqPromise = worker.request("ping");
 
-    // Read what was written to stdin
-    const stdinData = mockProc.stdin.read()?.toString() ?? "";
+    // Inspect captured stdin
+    const stdinData = (mockProc as unknown as { _stdinBuffer: () => string })._stdinBuffer();
     expect(stdinData).toContain('"method":"ping"');
     expect(stdinData).toContain('"id":"req_001"');
 
-    // Respond
     writeFromPython({ type: "result", id: "req_001", data: "pong" });
 
     const result = await reqPromise;
@@ -142,19 +156,13 @@ describe("spawnPythonEngine", () => {
     const p1 = worker.request("a");
     const p2 = worker.request("b");
 
-    const lines: string[] = [];
-    // Collect what's been written to stdin
-    let chunk: Buffer | null;
-    while ((chunk = mockProc.stdin.read()) !== null) {
-      lines.push(chunk.toString());
-    }
+    // Both requests are written synchronously before any async I/O,
+    // so the captured stdin should contain both IDs.
+    const stdinData = (mockProc as unknown as { _stdinBuffer: () => string })._stdinBuffer();
+    expect(stdinData).toContain("req_001");
+    expect(stdinData).toContain("req_002");
 
-    expect(lines.length).toBeGreaterThanOrEqual(2);
-    // First request should have req_001
-    expect(lines.join("")).toContain("req_001");
-    expect(lines.join("")).toContain("req_002");
-
-    // Respond to both (order doesn't matter because matching is by id)
+    // Respond to both (order doesn't matter — matching is by id)
     writeFromPython({ type: "result", id: "req_001", data: "a-ok" });
     writeFromPython({ type: "result", id: "req_002", data: "b-ok" });
 
@@ -195,7 +203,7 @@ describe("spawnPythonEngine", () => {
 
     await expect(worker.request("slow_op")).rejects.toThrow(/timed out/);
 
-    // Next request should work fine
+    // Next request should work fine (id is req_002 since req_001 was cleaned up)
     const reqPromise = worker.request("ping");
     writeFromPython({ type: "result", id: "req_002", data: "pong" });
     await expect(reqPromise).resolves.toBe("pong");
@@ -235,7 +243,6 @@ describe("spawnPythonEngine", () => {
     const events: WorkerStreamEvent[] = [];
     worker.onEvent((evt) => events.push(evt));
 
-    // Send a request that also produces stream events
     const reqPromise = worker.request("generate");
 
     writeFromPython({
@@ -304,7 +311,9 @@ describe("spawnPythonEngine", () => {
   it("sets running = false after subprocess crash", async () => {
     worker = spawnPythonEngine(config);
 
-    worker.request("op").catch(() => {});
+    // Fire and forget — we only check running flag
+    const caught: Error[] = [];
+    worker.request("op").catch((e: Error) => caught.push(e));
 
     // Wait for spawn
     await new Promise((r) => setTimeout(r, 10));
@@ -314,6 +323,9 @@ describe("spawnPythonEngine", () => {
     mockProc.emit("exit", 1, null);
 
     expect(worker.running).toBe(false);
+
+    // Consume the pending rejection so it doesn't leak
+    await new Promise((r) => setTimeout(r, 10));
   });
 
   it("rejects pending requests when subprocess is killed by signal", async () => {
@@ -334,35 +346,47 @@ describe("spawnPythonEngine", () => {
     const reqPromise = worker.request("ping");
 
     // Write garbage, then valid response
-    writeFromPython({ type: "not-even-json", oops: true } as unknown as Record<string, unknown>);
+    writeFromPython({
+      type: "not-even-json",
+      oops: true,
+    } as unknown as Record<string, unknown>);
     mockProc.stdout.write("this is not json at all\n");
     writeFromPython({ type: "result", id: "req_001", data: "pong" });
 
     const result = await reqPromise;
     expect(result).toBe("pong");
-    // Invalid lines are just skipped
   });
 
   // -- Kill ----------------------------------------------------------------
 
   it("kill sends SIGTERM then SIGKILL after 5s", async () => {
     vi.useFakeTimers();
+
+    // Create a mock where kill does NOT emit exit — we want to test
+    // the timer-based SIGKILL path, not the exit-early path.
+    const noExitProc = createMockProc();
+    // Replace the kill to not emit exit (just track calls)
+    const killCalls: string[] = [];
+    noExitProc.kill = vi.fn((signal?: string) => {
+      killCalls.push(signal ?? "SIGTERM");
+    });
+    // Override the global mockProc so execa() returns this one
+    mockProc = noExitProc;
+
     worker = spawnPythonEngine(config);
 
     // Trigger spawn
     worker.request("ping").catch(() => {});
     expect(worker.running).toBe(true);
 
-    const killSpy = vi.spyOn(mockProc, "kill");
-
     worker.kill();
 
     // First call: SIGTERM
-    expect(killSpy).toHaveBeenCalledWith("SIGTERM");
+    expect(killCalls).toContain("SIGTERM");
 
-    // After 5s: SIGKILL
+    // Advance 5s — the SIGKILL timer should fire since exit was never emitted
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(killSpy).toHaveBeenCalledWith("SIGKILL");
+    expect(killCalls).toContain("SIGKILL");
 
     vi.useRealTimers();
   });
@@ -380,14 +404,18 @@ describe("spawnPythonEngine", () => {
     };
 
     worker = spawnPythonEngine(config, testLogger);
+
+    // Trigger spawn
     worker.request("ping").catch(() => {});
 
-    // Wait for spawn, then write to stderr
-    await new Promise((r) => setTimeout(r, 10));
-    mockProc.stderr.write("WARNING: something happened\n");
+    // Wait for the subprocess + readline to be set up
+    await new Promise((r) => setTimeout(r, 30));
 
-    // Need to wait for readline to process
-    await new Promise((r) => setTimeout(r, 20));
+    // Write to stderr — readline will emit 'line' event asynchronously
+    writeToStderr("WARNING: something happened");
+
+    // Wait for the readline 'line' event to fire and our warn callback to run
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(logLines.some((l) => l.includes("something happened"))).toBe(true);
   });
@@ -398,6 +426,5 @@ describe("spawnPythonEngine", () => {
     const disabledConfig = makeConfig({ enabled: false });
     worker = spawnPythonEngine(disabledConfig);
     expect(worker.running).toBe(false);
-    // Request would still attempt to spawn (enabled is advisory)
   });
 });

@@ -958,7 +958,6 @@ zod
 konva
 react-konva
 tone
-@tonejs/midi
 ```
 
 Backend app dependencies:

@@ -125,9 +125,15 @@ export function spawnPythonEngine(
 
   function rejectAllPending(reason: string): void {
     const err = new Error(reason);
-    for (const [, req] of pending) {
+    const entries = Array.from(pending.entries());
+    for (const [id, req] of entries) {
       clearTimeout(req.timer);
-      req.reject(err);
+      pending.delete(id);
+      try {
+        req.reject(err);
+      } catch {
+        // promise may already be settled — ignore
+      }
     }
     pending.clear();
   }
@@ -237,7 +243,7 @@ export function spawnPythonEngine(
           }
         }, 5_000);
 
-        _subprocess.on("exit", () => {
+        _subprocess.once("exit", () => {
           clearTimeout(forceTimer);
         });
       }

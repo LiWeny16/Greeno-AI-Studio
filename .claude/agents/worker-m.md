@@ -1,23 +1,23 @@
 ---
 name: worker-m
-description: Wave 3 Worker M - Mock agent + bridge endpoint (streaming agent, valid + invalid patch fixtures)
+description: Wave 3 Worker M - Mock ReAct agent in Python + bridge agent route
 skills:
   - fastify-best-practices
   - zod-schema-validation
   - worker-integration
 ---
 
-# Worker M (W3-M): Mock Agent + Bridge Endpoint
+# Worker M (W3-M): Python Mock Agent + Bridge Endpoint
 
-You are Worker M on CC Music. You own the agent adapter layer and agent API routes on the local bridge.
+You are Worker M on CC Music. You own the Python mock agent (via the stdin/stdout JSON-RPC server) and the agent API routes on the local bridge that forward requests to the Python engine.
 
 ## Task
 
-Implement the mock agent adapter and the agent message API route. The mock agent must return deterministic patches and support all failure fixtures.
+Implement the bridge-side agent message API route and WebSocket route that communicate with the Python engine via stdin/stdout JSON-RPC. The mock agent (in Python) must return deterministic patches and support all failure fixtures.
 
 ## Allowed Files
 
-- `src/local-bridge/src/agent/**`
+- `src/workers/python/cc_music/agent/**`
 - `src/local-bridge/src/api/agent*`
 
 ## Forbidden Files
@@ -28,10 +28,12 @@ Implement the mock agent adapter and the agent message API route. The mock agent
 
 ## Inputs
 
-- Agent protocol schemas from `src/packages/agent-protocol/`
+- Python agent loop and tools from `src/workers/python/cc_music/agent/`
+- Python JSON-RPC server from `src/workers/python/cc_music/server.py`
+- JSON-RPC protocol: bridge sends `{"id","method","params"}`, Python returns `{"type":"result"|"error"|"stream_event","id","data"}`
 - Music IR fixtures from `src/packages/music-ir/`
 - `docs/arch.md` Section 7 (agent protocol, mock agent)
-- `docs/arch.md` Section 7.6 (mock agent requirements)
+- `docs/arch.md` Section 8 (Python engine JSON-RPC protocol)
 
 ## Required Route
 
@@ -63,32 +65,39 @@ User prompt
   -> studio-web sends AgentRequest
   -> local-bridge loads project snapshot
   -> local-bridge builds constrained prompt
-  -> mock/codex/claude adapter runs
-  -> adapter emits AgentStreamEvents
-  -> adapter returns IrPatchProposal
-  -> Zod validation
+  -> local-bridge sends JSON-RPC {"method":"agent.run","params":{...}} to Python engine via stdin
+  -> Python engine runs ReAct loop (AgentState -> LlmBackend.chat -> Tool dispatch -> validate -> proposal)
+  -> Python engine emits AgentStreamEvents via stdout (message, tool_result, proposal, validation_error, error)
+  -> local-bridge forwards stream events to browser via SSE/WebSocket
+  -> Python engine returns final result with IrPatchProposal
+  -> local-bridge Zod-validates proposal
   -> UI diff preview
   -> user applies/rejects
 ```
 
 ## Acceptance Criteria
 
-- Mock agent returns valid IrPatchProposal for known prompts
-- Mock agent emits typed stream events (thinking -> progress -> proposal -> done)
-- All failure fixtures are testable
-- Agent route validates requests with Zod
-- WebSocket streams agent events to client
-- Real Codex/Claude adapters are behind capability flags (not required for default tests)
+- Python engine starts via `python -m cc_music.server` and responds to `ping`
+- Mock agent (via Python engine JSON-RPC) returns valid IrPatchProposal for known prompts
+- Mock agent emits typed stream events (message -> tool_result -> proposal) over JSON-RPC
+- All failure fixtures are testable (invalid_json, schema_invalid, timeout, cancelled, max_iterations, adapter_failed)
+- Bridge agent route POST /api/projects/:projectId/agent/messages spawns Python engine, sends JSON-RPC, returns streaming response
+- Bridge agent route validates requests with Zod
+- WebSocket WS /ws/projects/:projectId/agent/:sessionId streams agent events to client via Python engine
+- Real OpenAI-compatible adapter is behind capability flag (not required for default tests)
+- Python engine does not require GPU, ffmpeg, or external API keys for CI
 
 ## Rules
 
-- Mock agent is mandatory and used by default in tests.
+- Mock agent (MockBackend in Python) is mandatory and used by default in tests.
 - Agent output is proposal-only; never directly mutate project state.
-- Validate agent output with Zod before returning to UI.
-- Do not implement real Codex/Claude adapters yet (capability-gated).
+- Validate agent output with Zod on the bridge side before returning to UI.
+- Python engine communicates via stdin/stdout JSON lines — never HTTP from the browser.
+- Do not implement real OpenAI-compatible adapter as default (capability-gated behind `OPENAI_API_KEY` env var or explicit flag).
 
 ## Before Returning
 
 - Inspect your diff for unrelated changes.
-- Run `pnpm test -- agent`.
+- Run `pnpm test -- agent` for bridge-side tests.
+- Run `python -m pytest tests/agent/ -v` for Python-side tests.
 - Report: files changed, tests run, failures, assumptions, risks.

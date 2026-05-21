@@ -6,19 +6,50 @@ on:
   pull_request:
 
 jobs:
-  verify:
+  typescript:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
+
       - run: pnpm install --frozen-lockfile=false
+
       - run: pnpm typecheck
+
+      - run: pnpm lint
+
       - run: pnpm test
+
       - run: pnpm exec playwright install --with-deps chromium
+
       - run: pnpm test:e2e -- --project=chromium
+        env:
+          CC_MUSIC_TEST_MODE: mocked
+          CC_MUSIC_PROJECT_ROOT: /tmp/cc-music-e2e
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Install and test Python engine
+        working-directory: src/workers/python
+        run: |
+          uv sync --extra dev
+          uv run pytest -v

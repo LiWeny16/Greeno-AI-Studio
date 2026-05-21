@@ -15,7 +15,7 @@ export declare const AgentSelectionSchema: z.ZodObject<{
 }>;
 export declare const AgentRequestSchema: z.ZodObject<{
     requestId: z.ZodString;
-    agent: z.ZodEnum<["mock", "codex", "claude"]>;
+    agent: z.ZodEnum<["mock", "codex", "claude", "openai_compat"]>;
     mode: z.ZodLiteral<"ir_patch">;
     prompt: z.ZodString;
     projectId: z.ZodString;
@@ -36,7 +36,7 @@ export declare const AgentRequestSchema: z.ZodObject<{
     allowedActions: z.ZodArray<z.ZodEnum<["propose_ir_patch", "explain_change"]>, "many">;
 }, "strip", z.ZodTypeAny, {
     requestId: string;
-    agent: "mock" | "codex" | "claude";
+    agent: "mock" | "codex" | "claude" | "openai_compat";
     mode: "ir_patch";
     prompt: string;
     projectId: string;
@@ -49,7 +49,7 @@ export declare const AgentRequestSchema: z.ZodObject<{
     allowedActions: ("propose_ir_patch" | "explain_change")[];
 }, {
     requestId: string;
-    agent: "mock" | "codex" | "claude";
+    agent: "mock" | "codex" | "claude" | "openai_compat";
     mode: "ir_patch";
     prompt: string;
     projectId: string;
