@@ -17,41 +17,35 @@ Agents propose structured patches; users apply them.
 
 ## 2. System Overview
 
+Architecture principle: **frontend is pure UI, backend does all compute.**
+
 ```text
-Browser UI
-  React / TS / Vite
-  Timeline, piano roll, inspector, agent panel
-  Tone.js playback
-  @tonejs/midi import/export
-  Konva canvas surfaces
-
-Local Bridge
-  Node / TS / Fastify
-  Project IO
-  Agent adapters
-  Job queue
-  Worker subprocess manager
-  WebSocket event streams
-
-Shared Packages
-  music-ir
-  timeline-engine
-  agent-protocol
-  test-fixtures
-
-Workers
-  MVP mock workers
-  Optional Python workers later
-  Optional heavy model adapters later
-
-Local Project Store
-  SQLite metadata
-  manifest.json
-  project.json
-  JSON snapshots
-  events.ndjson
-  MIDI exports
-  Rendered assets
+┌─────────────────────────────────────────────────┐
+│  Browser UI (React/TS/Vite)                     │
+│  ONLY: render state, capture input, playback    │
+│  NEVER: AI logic, music transforms, heavy calc  │
+│  Tone.js, Konva, lucide-react, Radix            │
+└──────────────────┬──────────────────────────────┘
+                   │ HTTP + WebSocket
+                   ▼
+┌─────────────────────────────────────────────────┐
+│  Local Bridge (Node/TS/Fastify)                 │
+│  ONLY: route messages, manage project files,    │
+│        spawn/kill Python workers, stream events │
+│  NEVER: AI logic, music transforms, tool calls  │
+└──────────────────┬──────────────────────────────┘
+                   │ subprocess (stdin/stdout JSON)
+                   ▼
+┌─────────────────────────────────────────────────┐
+│  Python Engine (src/workers/python/)            │
+│  ALL HEAVY COMPUTE LIVES HERE:                  │
+│  • Agent ReAct loop + LLM calling + tools       │
+│  • Music IR transforms (transpose, motif, etc.) │
+│  • MIDI parse/generate                          │
+│  • Model inference (Basic Pitch, ACE-Step, etc) │
+│  • Audio render (FluidSynth)                    │
+│  • Schema validation (Zod-equivalent in Python) │
+└─────────────────────────────────────────────────┘
 ```
 
 ## 3. Repository Layout
@@ -59,146 +53,163 @@ Local Project Store
 ```text
 cc-music/
   src/
-    studio-web/
+    studio-web/              # Frontend: pure UI only
       src/
-        app/
-        components/
+        app/                 # Shell layout, routing
+        components/ui/       # shadcn-ui primitives
         features/
-        lib/
-        stores/
-        testids.ts
-    local-bridge/
+          timeline/          # Konva canvas: section display, bar selection
+          piano-roll/        # Konva canvas: note grid, note edit
+          inspector/         # Selected object properties
+          agent-panel/       # Prompt input, thought log, diff preview
+          transport/         # Play/stop/seek, BPM/key display
+        stores/              # Zustand (UI state only)
+        lib/                 # cn helper, API client
+    local-bridge/            # Middleware: thin message router
       src/
-        api/
-        agent/
-        jobs/
-        projects/
-        security/
-        workers/
+        api/                 # Fastify HTTP routes
+        projects/            # Project file IO, snapshots, events
+        security/            # Origin validation, token
+        worker-manager.ts    # Spawn/kill/stream Python subprocess
         server.ts
-    packages/
-      music-ir/
-      timeline-engine/
-      agent-protocol/
-      tool-registry/
-      test-fixtures/
-    tests/
-      e2e/
-        app-smoke.spec.ts
-        helpers/
     workers/
-      python/
+      python/                # ★ THE ENGINE: all compute lives here
+        cc_music/
+          agent/             # ReAct loop, LLM adapters, tools
+          music/             # Music IR transforms, MIDI IO
+          models/            # Model inference adapters (post-MVP)
+          schema/            # Pydantic schemas (mirror TS Music IR)
+          server.py          # stdin/stdout JSON-RPC entry point
+        tests/
         pyproject.toml
-        README.md
+    packages/
+      music-ir/              # TS schemas (shared contract with Python)
+      agent-protocol/        # TS stream event types
+      test-fixtures/         # JSON fixtures (used by both TS and Python)
+    tests/
+      e2e/                   # Playwright E2E
   docs/
-    plan.md
-    path.md
-    arch.md
-    ownership.md
-  .github/
-    workflows/
-  CLAUDE.md
-  AGENTS.md
 ```
 
 ## 4. Technology Choices
 
-### 4.1 Frontend
+### 4.1 Frontend (studio-web)
+
+Pure UI. No business logic, no AI, no music computation.
 
 Use:
 
 - React 19 + TypeScript + Vite.
-- Tailwind CSS for layout and design tokens.
-- shadcn/ui component style with local components under `components/ui`.
-- Radix UI primitives for accessible menus, dialogs, tabs, tooltips, popovers, and toggles.
-- `lucide-react` for all normal UI icons.
-- Zustand for local editor/session state.
-- TanStack Query for local bridge API state.
-- React Hook Form + Zod resolver for forms.
+- Tailwind CSS + CSS variables (design tokens from `docs/uiux.md`).
+- shadcn/ui-style local components on Radix UI primitives.
+- `lucide-react` for icons.
+- Zustand for **UI state only** (selection, zoom, panel sizes, draft prompt). Never canonical project data.
+- TanStack Query for bridge API fetch/cache/invalidation.
 - Konva/react-konva for timeline and piano-roll canvases.
-- Tone.js for playback transport, scheduling, synths, and samplers.
-- `@tonejs/midi` for MIDI import/export.
-- Playwright for E2E, screenshots, and canvas checks.
+- Tone.js for **playback only** (transport scheduling, synth presets).
+- Playwright for E2E.
 
-Do not build from scratch:
-
-- MIDI parser/writer.
-- WebAudio transport/scheduling.
-- Canvas event scene graph.
-- Waveform region renderer once audio clips enter the product.
-- Dialog/select/menu/tooltip primitives.
-- Icon set.
+Frontend must NOT:
+- Run AI/LLM inference.
+- Execute music transforms (transpose, motif variation, etc.).
+- Parse or generate MIDI files.
+- Launch subprocesses or access filesystem.
+- Validate schemas beyond form inputs.
 
 Detailed UI/UX rules live in `docs/uiux.md`.
 
-### 4.2 Local Bridge
+### 4.2 Local Bridge (middleware)
+
+Thin message router between browser and Python engine. No AI logic.
 
 Use:
 
-- Node.js 24 Active LTS preferred; Node.js 22 Maintenance LTS supported while dependency compatibility requires it.
-- TypeScript.
-- Fastify HTTP API.
-- WebSocket for stream events.
-- Zod for all request/response/worker/agent validation.
-- `fastify-type-provider-zod` or equivalent thin Zod integration.
-- `@fastify/websocket` for agent/job streams.
-- `@fastify/static` only if the packaged app serves frontend assets from the bridge.
-- `@fastify/multipart` only when file upload is implemented.
-- SQLite through `better-sqlite3` for project index, job metadata, snapshots, capability cache.
-- `pino` logging through Fastify.
-- `execa` for subprocess adapters using argument arrays, not shell strings.
-- `p-queue` or a tiny equivalent queue for job concurrency and per-project write serialization.
-- Filesystem for project data, exported MIDI, and generated assets.
-- `node-pty` only if an interactive terminal stream is truly required later.
+- Node.js 24 + TypeScript + Fastify.
+- Zod for request/response validation at HTTP boundary.
+- `better-sqlite3` for project metadata index only (canonical state is files).
+- `execa` for Python subprocess management.
+- WebSocket for streaming Python events to browser.
+- `pino` for structured logging.
 
-The bridge is the only process allowed to:
+Bridge responsibilities:
+- Route HTTP requests from browser to Python worker JSON-RPC calls.
+- Manage project file IO (atomic writes, snapshots, recovery).
+- Spawn Python subprocess, pipe stdin/stdout JSON.
+- Stream Python stdout events to browser via WebSocket.
+- Validate Origin, enforce local token, bind to 127.0.0.1.
+- Redact secrets in logs.
 
-- Read/write project files.
-- Launch Codex/Claude.
-- Launch Python/model/ffmpeg workers.
-- Manage job cancellation and logs.
+Bridge must NOT:
+- Run AI/LLM inference or tool calls.
+- Execute music transforms or MIDI generation.
+- Parse or generate music data beyond JSON validation.
 
-Backend implementation rules:
+Same security rules as original (origin validation, atomic writes, per-project locks, process-tree cancellation, log redaction).
 
-- Bind to `127.0.0.1` by default, not `0.0.0.0`.
-- Validate Origin and require a local session token for browser-to-bridge calls in dev.
-- Reject `Origin: null`, absent browser Origin, wildcard CORS, and broad localhost trust.
-- Require the local token in an explicit HTTP/WS header, not only cookies.
-- Validate WebSocket Origin and token exactly like HTTP.
-- Use Vite proxy in development so the browser does not need broad CORS.
-- Use atomic file writes: write temp file, fsync where practical, rename.
-- Resolve and verify real paths before any project file read/write.
-- Reject symlinks that escape the project root.
-- Use per-project write locks to prevent snapshot/project corruption.
-- Never run subprocess commands through a shell.
-- Resolve subprocess executable paths and run only allowlisted binaries.
-- Use adapter-owned argument arrays; user text enters through stdin or validated temp files.
-- Pass a minimal environment allowlist to subprocesses instead of inheriting all of `process.env`.
-- Limit stdout/stderr bytes and truncate logs.
-- Kill the process tree on timeout or cancellation.
-- Set timeouts and cancellation signals for every subprocess.
-- Redact tokens, home auth paths, API keys, and command env values from logs.
-- Keep test routes disabled unless `CC_MUSIC_TEST_MODE=mocked` and `CC_MUSIC_PROJECT_ROOT` is a temp path.
-- Do not use `node-pty` until an explicit threat model is written.
+### 4.3 Python Engine (workers/python/)
 
-### 4.3 Workers
+**ALL heavy compute lives here.** This is the real backend.
 
-MVP workers are deterministic TypeScript modules. Real external tools are added later behind the same contracts.
+Use:
 
-Worker levels:
+- Python 3.12+ with `uv`.
+- **Pydantic** for all schemas (mirrors TypeScript Music IR — shared JSON fixtures ensure parity).
+- **Hand-written ReAct loop** (~200 lines). No LangChain, no LangGraph.
+- **Native LLM function calling** via `httpx` to any OpenAI-compatible endpoint.
+- **Adaptable LLM backends**: Claude CLI, Codex CLI, Ollama, vLLM, or any OpenAI-compatible HTTP API.
+- `miditoolkit` or `pretty_midi` for MIDI IO.
+- `numpy` for music math.
+- Post-MVP: `basic-pitch`, `torch`, `demucs`, `fluidsynth`.
 
-```text
-mock
-  CI/default. No external dependencies.
+Python engine layout:
 
-local-light
-  Node/TS only. MIDI transforms, fixture generation, simple playback metadata.
+```
+src/workers/python/cc_music/
+  agent/
+    loop.py            # ReAct loop core
+    tools.py            # Tool definitions + dispatch
+    adapters/
+      mock.py           # Deterministic mock (default tests)
+      claude_cli.py     # Claude via local CLI
+      openai_compat.py  # Any OpenAI-compatible endpoint
+  music/
+    ir.py               # Pydantic Music IR models
+    transforms.py       # Transpose, motif variation, quantize
+    midi_io.py          # MIDI import/export
+    validate.py         # Schema + lock validation
+  server.py             # stdin/stdout JSON-RPC entry point
+```
 
-local-python
-  Basic Pitch, FluidSynth/ffmpeg, analysis scripts.
+Bridge ↔ Python protocol (stdin/stdout JSON lines):
 
-local-heavy
-  ACE-Step, Demucs, image/VLM adapters.
+```
+Bridge → Python:
+  {"id":"req_001","method":"agent.run","params":{...}}
+  {"id":"req_002","method":"music.transpose","params":{...}}
+  {"id":"req_003","method":"midi.export","params":{...}}
+
+Python → Bridge (one JSON per line):
+  {"type":"stream_event","data":{...}}    (streaming progress)
+  {"type":"result","id":"req_001","data":{...}}  (final)
+  {"type":"error","id":"req_001","error":{...}}  (failure)
+```
+
+MVP Python dependencies:
+
+```
+pydantic
+httpx
+miditoolkit
+numpy
+```
+
+Deferred (post-MVP):
+
+```
+basic-pitch
+torch
+demucs
+fluidsynth
 ```
 
 ## 5. Music IR
@@ -271,50 +282,36 @@ Responsibilities:
 
 This package is heavily unit tested because it is the product's control layer.
 
-## 7. Agent Protocol
+## 7. Agent Protocol (Python Engine)
 
-Agents are implementation assistants, not autonomous file mutators.
-
-The adapter runs a **ReAct loop** (Reason + Act) orchestrated by **LangGraph**, but the external contract stays the same: one AgentRequest in, one IrPatchProposal out, user approves before any mutation.
+Agents are assistants, not autonomous mutators. The ReAct loop runs entirely in the **Python engine** as a subprocess; the bridge only routes messages.
 
 ### 7.1 Request Flow
 
 ```text
-User prompt
-  -> studio-web sends AgentRequest
-  -> local-bridge loads project snapshot
-  -> local-bridge builds structured system prompt with Music IR context
-  -> adapter runs LangGraph ReAct loop (internal, multi-step):
-       ┌─────────────────────────────────────────────────┐
-       │  AnalyzeRequest → Plan → ToolCall → Observe →   │
-       │  GeneratePatch → SelfValidate → RefineOrFinalize │
-       └─────────────────────────────────────────────────┘
-       Each thought/action/observation emitted as AgentStreamEvent
-  -> adapter returns IrPatchProposal
-  -> Zod validation
-  -> UI diff preview
-  -> user applies/rejects
+Browser prompt
+  → bridge POST /api/projects/:id/agent/messages
+  → bridge sends JSON-RPC to Python: {"method":"agent.run","params":{...}}
+  → Python runs hand-written ReAct loop:
+       think → call tool → observe → think → ... → finalize
+       (LLM calls any OpenAI-compatible endpoint via httpx)
+       (tools are Python functions, read-only or produce intermediate artifacts)
+       (each step streams events back via stdout)
+  → Python returns IrPatchProposal (JSON)
+  → bridge validates + returns to browser
+  → UI shows diff preview
+  → user applies/rejects
 ```
-
-The ReAct loop is an **adapter-internal implementation detail**. The external API surface (AgentRequest → AgentStreamEvents → IrPatchProposal) is unchanged. The agent cannot write to project files; tools are read-only or produce intermediate artifacts.
 
 ### 7.2 Agent Request
 
 ```json
 {
   "agent": "mock",
-  "mode": "ir_patch",
   "prompt": "make bars 9-16 a darker electronic variation but preserve motif A",
-  "selection": {
-    "barRange": [9, 16],
-    "sectionIds": ["sec_b"],
-    "trackIds": ["track_piano"]
-  },
+  "selection": { "barRange": [9, 16], "sectionIds": ["sec_b"], "trackIds": ["track_piano"] },
   "snapshotId": "snap_0004",
-  "allowedActions": [
-    "propose_ir_patch",
-    "explain_change"
-  ]
+  "allowedActions": ["propose_ir_patch", "explain_change"]
 }
 ```
 
@@ -323,246 +320,104 @@ The ReAct loop is an **adapter-internal implementation detail**. The external AP
 ```json
 {
   "type": "ir_patch_proposal",
-  "summary": "Create a darker higher-energy variation while keeping motif contour.",
-  "patch": [
-    {
-      "op": "replace",
-      "path": "/sections/1/style/genre",
-      "value": "dark minimal electronic"
-    }
-  ],
-  "musicalDiff": {
-    "barsChanged": [9, 16],
-    "notesAdded": 12,
-    "notesRemoved": 4,
-    "preservedMotifs": ["motif_main"]
-  }
+  "summary": "Darker electronic variation preserving motif contour.",
+  "patch": [{"op": "replace", "path": "/sections/1/style/genre", "value": "dark minimal electronic"}],
+  "musicalDiff": { "barsChanged": [9, 16], "notesAdded": 12, "notesRemoved": 4, "preservedMotifs": ["motif_main"] }
 }
 ```
 
-### 7.4 LangGraph ReAct Loop Architecture
+### 7.4 Hand-Written ReAct Loop
 
-The agent adapter uses **LangGraph** (TypeScript, `@langchain/langgraph`) to orchestrate a stateful ReAct loop. The graph is a directed state machine with conditional edges. The loop runs entirely inside the bridge process — the browser only sees stream events and the final proposal.
+No framework. ~200 lines of Python. Core pattern:
 
-#### 7.4.1 Agent State
+```python
+# src/workers/python/cc_music/agent/loop.py
 
-```typescript
-interface AgentState {
-  // Immutable context
-  projectSnapshot: MusicIr;
-  userPrompt: string;
-  selection: AgentSelection;
-  
-  // ReAct loop state
-  messages: BaseMessage[];        // LLM conversation history
-  currentStep: string;            // current graph node name
-  iterationCount: number;         // safety limit
-  
-  // Intermediate artifacts
-  analysis?: MusicAnalysis;       // structured analysis of target bars
-  plan?: EditPlan;                // sequence of intended edits
-  intermediatePatch?: IrPatchProposal;  // draft patch (may be refined)
-  
-  // Terminal output
-  finalProposal?: IrPatchProposal;
-  error?: AgentError;
-}
+async def react_loop(state: AgentState, tools: list[Tool], llm: LlmBackend) -> AgentResult:
+    """Reason + Act loop. Pure Python, no framework."""
+    iteration = 0
+    while iteration < state.max_iterations:
+        # 1. Call LLM with conversation history + tool definitions
+        response = await llm.chat(
+            system=build_system_prompt(state.snapshot, state.selection),
+            messages=state.messages,
+            tools=[t.schema() for t in tools],
+        )
+
+        # 2. If LLM returns tool calls, execute them
+        if response.tool_calls:
+            for tc in response.tool_calls:
+                result = await dispatch_tool(tc, tools, state)
+                state.messages.append(tool_result_message(tc.id, result))
+                emit_event("message", summarize(result))
+
+        # 3. If LLM returns a proposal, validate and finalize
+        elif response.proposal:
+            if validate_patch(response.proposal, state.snapshot):
+                emit_event("proposal", response.proposal)
+                return AgentResult(success=True, proposal=response.proposal)
+            else:
+                state.messages.append(validation_feedback())  # retry
+
+        # 4. Otherwise, LLM is still thinking — continue
+        else:
+            state.messages.append(assistant_message(response.text))
+            emit_event("message", response.text)
+
+        iteration += 1
+
+    return AgentResult(success=False, error="max_iterations_exceeded")
 ```
 
-#### 7.4.2 Graph Nodes
+### 7.5 Agent Tools
 
-```text
-                    ┌──────────┐
-                    │  START   │
-                    └────┬─────┘
-                         │
-                    ┌────▼─────┐
-                    │ ANALYZE  │ ← LLM: analyze selection, identify patterns
-                    └────┬─────┘
-                         │
-                    ┌────▼─────┐
-                    │  PLAN    │ ← LLM: decide which edit tools to call
-                    └────┬─────┘
-                         │
-              ┌──────────▼──────────┐
-              │    TOOL_EXECUTE     │ ← Execute tool calls, collect results
-              └──────────┬──────────┘
-                         │
-                    ┌────▼─────┐
-                    │ OBSERVE  │ ← LLM: interpret tool results, decide next action
-                    └────┬─────┘
-                         │
-              ┌──────────┼──────────┐
-              │          │          │
-         need_more    confident   max_iter
-              │          │          │
-              ▼          ▼          ▼
-         back to    GENERATE_PATCH  │
-         PLAN       │               │
-                    ▼               ▼
-              SELF_VALIDATE    FINALIZE_ERROR
-                    │
-              ┌─────┼─────┐
-              │           │
-          passes       fails
-              │           │
-              ▼           ▼
-         FINALIZE    back to PLAN
-              │       (with validation errors)
-              ▼
-           END
+Music-domain tools. All Python functions. All read-only or produce temp artifacts.
+
+| Tool | ReadOnly | What It Does |
+|---|---|---|
+| `read_ir_section` | Yes | Return Music IR for bar range: notes, motifs, chords, style, locks |
+| `analyze_motif` | Yes | Pitch contour, rhythm pattern, interval structure, register, density |
+| `analyze_chord_progression` | Yes | Identify chords, cadences, map chord tones to scale degrees |
+| `generate_motif_variation` | No | New motif variant (transpose, invert, rhythm change) → temp Motif |
+| `generate_counter_melody` | No | Counter-melody against existing motif |
+| `generate_bassline` | No | Bassline following chord progression |
+| `generate_drum_pattern` | No | Rhythm pattern for drum track |
+| `validate_patch_schema` | Yes | Pydantic validation of candidate patch |
+| `check_lock_violations` | Yes | Verify no section/note locks are violated |
+| `build_patch_json` | No | Assemble tool outputs → valid IrPatchProposal |
+
+### 7.6 LLM Backend (Adapter Pattern)
+
+All LLM calls use the same interface, backing is swappable:
+
+```python
+class LlmBackend(Protocol):
+    async def chat(self, system: str, messages: list, tools: list[dict]) -> LlmResponse: ...
+
+class OpenAiCompatBackend:    # Ollama, vLLM, any /v1/chat/completions endpoint
+class ClaudeCliBackend:       # Local `claude --print --output-format stream-json`
+class CodexCliBackend:        # Local `codex exec`
+class MockBackend:            # Deterministic responses for tests
 ```
 
-**Nodes:**
+### 7.7 Mock Agent
 
-| Node | Role | LLM? | Tools? |
-|---|---|---|---|
-| `ANALYZE` | Examine selected bars: motifs, chords, rhythm patterns, energy curve | Yes | `read_ir_section`, `analyze_motif` |
-| `PLAN` | Decide which edits to make, in what order | Yes | None (reasoning only) |
-| `TOOL_EXECUTE` | Run planned tool calls deterministically | No | All registered tools |
-| `OBSERVE` | Feed tool results back to LLM, decide: continue refining or proceed? | Yes | None (reasoning only) |
-| `GENERATE_PATCH` | Convert plan + tool results into structured `IrPatchProposal` JSON | Yes | `build_patch_json` (non-LLM post-process) |
-| `SELF_VALIDATE` | Validate generated patch against schema, locks, and musical constraints | No | `validate_patch_schema`, `check_lock_violations` |
-| `FINALIZE` | Emit final proposal stream event, return result | No | None |
-| `FINALIZE_ERROR` | Emit structured error with diagnostics | No | None |
+Deterministic ReAct loop for tests. Matches known prompts to fixed tool sequences + stream events. Supports all failure modes: invalid JSON, schema-invalid patch, timeout, cancelled, max iterations.
 
-#### 7.4.3 Safety Limits
+### 7.8 Streaming Protocol
 
-- `maxIterations`: 10 (configurable). Exceeding returns partial result + error.
-- `maxToolCallsPerStep`: 5.
-- `maxLLMTokensPerCall`: 4096 input, 2048 output.
-- `timeoutMs`: 30000 default (MVP), 120000 for complex sessions.
-
-#### 7.4.4 Streaming to UI
-
-Each node transition emits an `AgentStreamEvent`:
+Python emits one JSON line per event to stdout:
 
 ```json
-{"type": "started", "requestId": "req_001", "timestamp": "..."}
-{"type": "message", "requestId": "req_001", "message": "Analyzing bars 9-16: found motif_main (A4-C5-E5-D5 pattern), energy 0.35, genre 'minimal piano'"}
-{"type": "message", "requestId": "req_001", "message": "Plan: darken genre, raise energy to 0.65, add bassline, preserve motif contour"}
-{"type": "message", "requestId": "req_001", "message": "Generated variation: added bass D3-F3-G3, replaced piano with dark pad, velocity +0.15"}
-{"type": "message", "requestId": "req_001", "message": "Self-validation: patch valid, no lock violations, 12 notes added, 0 removed"}
-{"type": "proposal", "requestId": "req_001", "proposal": { ... }}
-{"type": "completed", "requestId": "req_001", "timestamp": "..."}
+{"type":"message","data":{"text":"Analyzing bars 9-16..."}}
+{"type":"message","data":{"text":"Plan: darken genre, add bassline..."}}
+{"type":"message","data":{"text":"Generated variation: 12 notes added."}}
+{"type":"proposal","data":{...}}
+{"type":"done","data":{}}
+{"type":"error","data":{"code":"timeout","message":"..."}}
 ```
 
-UI renders `message` events as a streaming thought log so the user sees the agent's reasoning.
-
-### 7.5 Agent Tools (Function Calling)
-
-Tools are music-domain-specific functions the LLM can invoke during the ReAct loop. All tools are **read-only or produce intermediate artifacts** — none can write to project files.
-
-#### 7.5.1 Tool Registry
-
-```typescript
-interface AgentTool {
-  name: string;
-  description: string;           // LLM-readable description for function calling
-  parameters: ZodSchema;         // JSON Schema for LLM function call args
-  execute: (args: unknown, ctx: ToolContext) => Promise<ToolResult>;
-  readOnly: boolean;             // true = no side effects, false = produces artifact
-}
-
-interface ToolContext {
-  projectSnapshot: MusicIr;
-  selection: AgentSelection;
-  workingDir: string;            // temp dir for intermediate artifacts
-}
-
-interface ToolResult {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-  artifacts?: string[];          // paths to generated files (MIDI previews, etc.)
-}
-```
-
-#### 7.5.2 MVP Tool Set
-
-| Tool | ReadOnly | Description |
-|---|---|---|
-| `read_ir_section` | Yes | Return full Music IR for a bar range or section: notes, motifs, chords, style, locks |
-| `analyze_motif` | Yes | Extract motif properties: pitch contour, rhythm pattern, interval structure, register |
-| `analyze_chord_progression` | Yes | Identify chord progression in a section, detect cadences |
-| `generate_motif_variation` | No | Create a new motif variant (transpose, invert, rhythm change, etc.) — returns a Motif candidate, does NOT write to project |
-| `generate_counter_melody` | No | Create a counter-melody line against an existing motif |
-| `generate_bassline` | No | Create a bassline following the chord progression |
-| `generate_drum_pattern` | No | Create a rhythm pattern for a drum track |
-| `validate_patch_schema` | Yes | Run Zod validation on a candidate patch, return errors if any |
-| `check_lock_violations` | Yes | Verify a candidate patch does not violate section/note locks |
-| `build_patch_json` | No | Assemble tool outputs into a properly formatted `IrPatchProposal` |
-| `render_preview_midi` | No | Synthesize candidate notes to a temp MIDI file for reference (lightweight, mock in tests) |
-
-#### 7.5.3 Tool Execution Model
-
-Tools run as **subprocess calls** on the bridge, same as other workers. Each tool gets:
-- Typed input (Zod-validated)
-- Sandboxed working directory (temp, cleaned up after session)
-- Byte-limited output
-- Timeout (10s default for analysis tools, 30s for generation tools)
-
-The LLM sees tool definitions as JSON Schema function declarations and can request tool calls as part of its response. The `TOOL_EXECUTE` node dispatches calls, collects results, and feeds them back in the next LLM turn.
-
-### 7.6 LangGraph Implementation
-
-Use `@langchain/langgraph` (TypeScript) with `@langchain/anthropic` for Claude or `@langchain/openai` for Codex as the LLM backend.
-
-```
-src/local-bridge/src/agent/
-  graph.ts              — LangGraph state machine definition (nodes + edges)
-  state.ts              — AgentState type + initial state factory
-  tools/
-    index.ts            — tool registry + dispatch
-    read-ir.ts          — read_ir_section, analyze_motif, analyze_chord_progression
-    generate.ts         — generate_motif_variation, generate_counter_melody, etc.
-    validate.ts         — validate_patch_schema, check_lock_violations
-    build-patch.ts      — build_patch_json, render_preview_midi
-  adapters/
-    mock.ts             — deterministic mock agent (no LLM, fixed tool outputs)
-    claude.ts           — Claude adapter (LangChain Anthropic backend)
-    codex.ts            — Codex adapter (LangChain OpenAI-compatible backend)
-```
-
-### 7.7 Mock Agent (ReAct Mode)
-
-The mock agent simulates a ReAct loop without requiring an LLM:
-
-- Matches known prompt patterns to deterministic tool call sequences
-- Returns pre-defined `AgentStreamEvent` sequences (analyze → plan → generate → validate → finalize)
-- Supports failure fixtures: invalid tool output, schema-invalid patch, timeout, max iterations exceeded
-- Verifies that the graph itself executes correctly
-
-### 7.8 Local Claude Adapter
-
-Local command supports:
-
-```text
-claude --print
-claude --output-format stream-json
-claude --json-schema <schema>
-```
-
-Adapter responsibilities:
-- Wrap Claude in a LangGraph-compatible LLM interface
-- Pass tool definitions as function calling schema
-- Parse Claude's tool call requests into `TOOL_EXECUTE` dispatch
-- Stream Claude's thinking as `AgentStreamEvent` messages
-- Fall back to `--print --output-format stream-json` if LangGraph is not available
-
-### 7.9 Local Codex Adapter
-
-Local command:
-
-```text
-codex exec
-```
-
-Adapter responsibilities:
-- Same LangGraph integration as Claude adapter
-- Use OpenAI-compatible function calling for tools
-- Force JSON output mode for structured responses
-- Reject non-schema output as adapter failure
+Bridge parses each line, wraps as AgentStreamEvent, and forwards to browser via WebSocket.
 
 - invalid JSON.
 - schema-invalid patch.
@@ -1111,18 +966,37 @@ Backend app dependencies:
 ```text
 fastify
 @fastify/websocket
-@fastify/static
-@fastify/multipart
 fastify-type-provider-zod
 zod
 better-sqlite3
 execa
 p-queue
 nanoid
-@langchain/langgraph
-@langchain/core
-@langchain/anthropic
-@langchain/openai
+```
+
+Python engine dependencies (pyproject.toml):
+
+```text
+pydantic
+httpx
+miditoolkit
+numpy
+```
+
+Defer until needed:
+
+```text
+wavesurfer.js
+react-resizable-panels
+immer
+fast-json-patch
+node-pty
+ffmpeg wrappers
+basic-pitch
+torch
+demucs
+fluidsynth bindings
+ACE-Step / model weights
 ```
 
 Test/dev dependencies:

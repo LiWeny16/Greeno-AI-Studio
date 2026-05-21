@@ -311,74 +311,79 @@ Workers:
 - Phase 2: Python workers for Basic Pitch, FluidSynth/ffmpeg render, audio analysis.
 - Phase 3: ACE-Step, Demucs, image-to-music-brief, and other optional heavy adapters.
 
-## 10. Agent Integration
+## 10. Agent Integration (Python Engine)
 
-Browser does not launch local agents. `src/local-bridge` owns all subprocesses.
+Browser never launches agents. Bridge never runs AI. **All agent intelligence lives in Python.**
 
-### 10.1 Core Architecture
-
-Local CLI capability found on this machine:
-
-- `codex` exists and supports `codex exec` for non-interactive execution.
-- `claude` exists and supports `claude --print`, `--output-format stream-json`, and `--json-schema`.
-
-MVP adapter strategy:
+### 10.1 Architecture
 
 ```text
-UI prompt
-  -> local bridge validates project + selection
-  -> bridge loads Music IR snapshot as AgentState
-  -> adapter runs LangGraph ReAct loop:
-       AnalyzeRequest → Plan → ToolCall → Observe → GeneratePatch → SelfValidate → Finalize
-       (multi-step, LLM reasons + calls music-domain tools, tools are read-only or
-        produce intermediate artifacts, agent CANNOT write to project files)
-  -> adapter returns IrPatchProposal
-  -> Zod validates
-  -> UI shows diff
-  -> user applies or rejects
+Browser (React)
+  │  POST /api/projects/:id/agent/messages
+  ▼
+Bridge (Node/Fastify)
+  │  JSON-RPC over stdin/stdout to Python subprocess
+  ▼
+Python Engine (cc_music/agent/)
+  │  Hand-written ReAct loop (~200 lines)
+  │  LLM calls via httpx to any OpenAI-compatible endpoint
+  │  10 music-domain tools as Python functions
+  │  Pydantic schemas mirror TypeScript Music IR
+  │  Streams events back over stdout
+  ▼
+Bridge validates + returns IrPatchProposal to browser
+  ▼
+UI shows diff → user applies/rejects
 ```
 
-### 10.2 LangGraph ReAct Loop
+### 10.2 ReAct Loop (Pure Python)
 
-The agent uses **LangGraph** (`@langchain/langgraph`) to orchestrate a stateful ReAct (Reason + Act) loop as an **adapter-internal implementation detail**. The external API contract (AgentRequest → AgentStreamEvents → IrPatchProposal) does not change.
+No frameworks. ~200 lines:
 
-Key design points:
-
-- **ReAct loop runs inside the bridge adapter**, not in the browser
-- **10 music-domain tools** available to the LLM: read_ir_section, analyze_motif, analyze_chord_progression, generate_motif_variation, generate_counter_melody, generate_bassline, generate_drum_pattern, validate_patch_schema, check_lock_violations, build_patch_json
-- All tools are **read-only or produce intermediate artifacts** — none can write to project files
-- **Safety limits**: max 10 iterations, max 5 tool calls per step, 30s timeout
-- **Streaming**: each reasoning step and tool call emits an AgentStreamEvent so the user can see the agent's thought process
-- **Self-validation**: generated patches are validated against schema and lock constraints before returning to the UI
-- **Mock agent** implements the same ReAct graph with deterministic tool outputs for testing
-
-```text
-LangGraph State Machine:
-  START → ANALYZE → PLAN → TOOL_EXECUTE → OBSERVE
-                ↑                              │
-                └────── need_more ─────────────┘
-                           │ confident
-                           ▼
-                GENERATE_PATCH → SELF_VALIDATE
-                           │            │
-                      passes        fails → back to PLAN
-                           │
-                           ▼
-                       FINALIZE → END
+```python
+while iteration < max_iterations:
+    response = await llm.chat(messages=history, tools=tool_schemas)
+    if response.tool_calls:
+        results = await execute_tools(response.tool_calls)
+        history.append(tool_results)
+    elif response.proposal:
+        if validate(response.proposal):
+            return response.proposal  # success
+        else:
+            history.append(validation_errors)  # retry
+    else:
+        history.append(response.text)  # continue thinking
 ```
 
-### 10.3 New Dependencies
+### 10.3 LLM Backends (Swappable)
 
-```text
-@langchain/langgraph     — TypeScript state machine for ReAct loop
-@langchain/anthropic     — Claude LLM backend (optional, capability-gated)
-@langchain/openai        — Codex LLM backend (optional, capability-gated)
-@langchain/core          — Base messages, tools, prompts
-```
+| Backend | When Used | Transport |
+|---|---|---|
+| `MockBackend` | Default tests, CI | Returns deterministic responses |
+| `OpenAiCompatBackend` | Ollama, vLLM, any local model | `httpx` → `/v1/chat/completions` |
+| `ClaudeCliBackend` | Claude CLI available | Subprocess: `claude --print --output-format stream-json` |
+| `CodexCliBackend` | Codex CLI available | Subprocess: `codex exec` |
 
-These are **adapter-level dependencies**. Default tests use the mock agent (no LLM required). Real LLM backends are capability-gated behind `CC_MUSIC_AGENT_ADAPTER=claude` or `=codex`.
+### 10.4 Music Tools
 
-Default test mode uses `mock-agent`, not real Claude/Codex.
+10 Python tools callable by the LLM during ReAct loop. All read-only or produce temp artifacts. None write to project files.
+
+| Category | Tools |
+|---|---|
+| Read | `read_ir_section`, `analyze_motif`, `analyze_chord_progression` |
+| Generate | `generate_motif_variation`, `generate_counter_melody`, `generate_bassline`, `generate_drum_pattern` |
+| Validate | `validate_patch_schema`, `check_lock_violations`, `build_patch_json` |
+
+### 10.5 Safety
+
+- Max 10 ReAct iterations
+- Max 5 tool calls per step
+- 30s timeout (120s for complex)
+- Python subprocess killed on timeout/cancel
+- No filesystem write access outside temp dir
+- All patches Pydantic-validated before returning
+
+Default test mode uses `mock-agent` with deterministic tool outputs.
 
 ## 11. Milestones
 
@@ -448,25 +453,24 @@ Done:
 - User can enter 3-8 notes, save motif, generate/duplicate section material.
 - MIDI round-trip preserves notes and tempo.
 
-### M4: Agent Patch Loop (ReAct + LangGraph)
+### M4: Agent Patch Loop (Python ReAct + Hand-Written Loop)
 
-- LangGraph TypeScript state machine: Analyze → Plan → ToolCall → Observe → Generate → Validate → Finalize.
-- 10 music-domain tools with function calling: read IR, analyze motif, generate variations, validate patches, render previews.
-- Mock agent implements full ReAct graph with deterministic tool outputs for testing.
-- Real Codex/Claude adapters behind capability flags, using `@langchain/anthropic` / `@langchain/openai`.
-- Streaming thought log: each ReAct step emitted as AgentStreamEvent to UI.
-- Self-validation: schema + lock checks before returning proposal to user.
+- Hand-written ReAct loop in Python (~200 lines). No LangGraph, no LangChain.
+- 10 music-domain tools as Python functions. Native OpenAI-compatible function calling via httpx.
+- LLM backends: Mock (deterministic), Claude CLI, Codex CLI, any OpenAI-compatible endpoint (Ollama/vLLM).
+- Bridge ↔ Python JSON-RPC over stdin/stdout. Bridge only routes messages.
+- Streaming thought log: each ReAct step emitted as JSON event to stdout, forwarded to browser.
+- Self-validation: Pydantic schema + lock checks before returning proposal.
+- Mock agent implements full ReAct loop with deterministic tool outputs for tests.
 - Diff preview + Apply/Reject with undo/redo.
-- Safety: max 10 iterations, max 5 tool calls per step, 30s timeout, no direct file writes.
+- Safety: max 10 iterations, max 5 tool calls per step, 30s timeout, no filesystem writes.
 
 Done:
-
 - Mock ReAct agent returns valid patch with visible reasoning steps.
-- Prompt "make bars 9-16 darker but keep motif" triggers: analyze section → plan edits → generate variation → self-validate → propose patch.
-- UI previews note/section changes with thought log visible.
-- Apply updates Music IR through mutation pipeline.
-- Undo restores prior snapshot.
-- All failure modes testable: invalid tool output, schema-invalid patch, timeout, max iterations.
+- Prompt "make bars 9-16 darker" triggers: analyze → plan → generate → validate → propose.
+- UI shows thought log + diff preview.
+- All failure modes testable via mock agent.
+- Python tests run via `uv run pytest`.
 
 ### M5: Export + Demo Hardening
 
