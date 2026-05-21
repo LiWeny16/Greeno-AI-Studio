@@ -1,21 +1,64 @@
-# CC Music
+# Greeno AI Studio
 
-CC Music is a local-first, open-source AI music studio focused on controllable MIDI composition.
+Local-first, open-source AI MIDI editor for structured composition.
 
-The MVP is intentionally narrow:
+**AI that edits the song structure you can see and control: bars, sections, motifs, chords, and tracks.**
 
-- Music IR as the canonical project format.
-- Timeline and piano-roll editing.
-- AI patch proposals with preview/apply/reject.
-- Undo, snapshots, local audit events, and MIDI export.
-- Mock-first tests and optional local agent/model adapters.
+## Architecture
 
-Read these before implementation:
+```
+Browser (React/TS)  →  Bridge (Node/Fastify)  →  Python Engine
+  Pure UI only          Message router            All compute
+  • Timeline            • Project file IO         • ReAct agent loop
+  • Piano roll          • Subprocess manager      • LLM tool calling
+  • Inspector           • Security / auth         • Music transforms
+  • Agent panel         • WebSocket streams       • MIDI import/export
+  • Playback (Tone.js)                            • Schema validation
+```
 
-- `CLAUDE.md`
-- `AGENTS.md`
-- `docs/plan.md`
-- `docs/arch.md`
-- `docs/path.md`
-- `docs/ownership.md`
-- `docs/uiux.md`
+## MVP Core Loop
+
+```
+Create project → Arrange sections → Enter motif → Ask AI for variation
+→ Preview diff → Apply or reject → Undo/redo → Export MIDI
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 19, TypeScript, Vite, Tailwind, Konva, Tone.js, Zustand |
+| Bridge | Node.js 24, Fastify, Zod, SQLite, WebSocket |
+| Python Engine | Python 3.12+, Pydantic, httpx, miditoolkit, numpy |
+| AI Agent | Hand-written ReAct loop (~200 lines), no frameworks |
+| Tests | Vitest, Playwright, pytest |
+
+## Getting Started
+
+```bash
+# Frontend + Bridge
+pnpm install
+pnpm dev          # starts Vite + Fastify bridge
+
+# Python Engine
+cd src/workers/python
+uv sync
+uv run python -m cc_music.server
+```
+
+## Project Structure
+
+```
+src/
+  studio-web/        # Frontend: pure UI
+  local-bridge/      # Bridge: message router + file IO
+  workers/python/    # Python Engine: ALL compute
+    cc_music/
+      agent/         # ReAct loop, tools, LLM adapters
+      music/         # Music IR models, transforms, MIDI IO
+  packages/          # Shared TS schemas + fixtures
+```
+
+## License
+
+AGPL-3.0-or-later
