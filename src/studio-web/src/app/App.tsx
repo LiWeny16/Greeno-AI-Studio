@@ -29,6 +29,8 @@ import { PianoRoll } from "../features/piano-roll/PianoRoll";
 import { Inspector } from "../features/inspector/Inspector";
 import { AgentPanel } from "../features/agent-panel/AgentPanel";
 import { Transport } from "../features/transport/Transport";
+import { QueryProvider } from "../lib/api";
+import { useProject } from "../lib/api";
 
 export function App() {
   const activeEditorTab = useEditorStore((s) => s.activeEditorTab);
@@ -44,10 +46,14 @@ export function App() {
   const toggleBottomCollapsed = usePanelStore((s) => s.toggleBottomCollapsed);
   const panelSizes = usePanelStore((s) => s.panelSizes);
 
-  const firstSection = sampleMusicIr.sections[0];
+  const { data: projectIr } = useProject("demo");
+  const musicIr = projectIr ?? sampleMusicIr;
+
+  const firstSection = musicIr.sections[0];
   const barCount = firstSection ? barRangeLength(firstSection.barRange) : 0;
 
   return (
+    <QueryProvider>
     <TooltipProvider delayDuration={300}>
       <div
         className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
@@ -63,10 +69,10 @@ export function App() {
             <Music2 className="h-[18px] w-[18px] text-accent" />
             <div className="flex flex-col leading-none">
               <span className="text-body font-medium">
-                {sampleMusicIr.title}
+                {musicIr.title}
               </span>
               <span className="text-compact text-muted-foreground">
-                {sampleMusicIr.projectId}
+                {musicIr.projectId}
               </span>
             </div>
             <Badge variant="success" className="ml-1">
@@ -79,11 +85,11 @@ export function App() {
           {/* Project metadata */}
           <div className="flex items-center gap-3 text-compact text-muted">
             <span className="text-editor-value text-foreground">
-              {sampleMusicIr.tempo} BPM
+              {musicIr.tempo} BPM
             </span>
-            <span className="text-foreground">{sampleMusicIr.key}</span>
+            <span className="text-foreground">{musicIr.key}</span>
             <span className="text-muted-foreground">
-              {sampleMusicIr.timeSignature}
+              {musicIr.timeSignature}
             </span>
           </div>
 
@@ -150,11 +156,11 @@ export function App() {
                         Motifs
                       </span>
                       <span className="text-compact text-muted-foreground">
-                        {sampleMusicIr.motifs.length}
+                        {musicIr.motifs.length}
                       </span>
                     </div>
                     <div className="flex flex-col gap-1">
-                      {sampleMusicIr.motifs.map((motif) => (
+                      {musicIr.motifs.map((motif) => (
                         <div
                           key={motif.id}
                           className="cursor-pointer rounded-control px-3 py-1.5 text-compact text-foreground transition-colors hover:bg-surface"
@@ -173,11 +179,11 @@ export function App() {
                         Tracks
                       </span>
                       <span className="text-compact text-muted-foreground">
-                        {sampleMusicIr.tracks.length}
+                        {musicIr.tracks.length}
                       </span>
                     </div>
                     <div className="flex flex-col gap-1">
-                      {sampleMusicIr.tracks.map((track) => (
+                      {musicIr.tracks.map((track) => (
                         <div
                           key={track.id}
                           className="cursor-pointer rounded-control px-3 py-1.5 text-compact text-foreground transition-colors hover:bg-surface"
@@ -195,11 +201,11 @@ export function App() {
                         Sections
                       </span>
                       <span className="text-compact text-muted-foreground">
-                        {sampleMusicIr.sections.length}
+                        {musicIr.sections.length}
                       </span>
                     </div>
                     <div className="flex flex-col gap-1">
-                      {sampleMusicIr.sections.map((section) => (
+                      {musicIr.sections.map((section) => (
                         <div
                           key={section.id}
                           className="cursor-pointer rounded-control px-3 py-1.5 text-compact text-foreground transition-colors hover:bg-surface"
@@ -424,5 +430,6 @@ export function App() {
         )}
       </div>
     </TooltipProvider>
+    </QueryProvider>
   );
 }

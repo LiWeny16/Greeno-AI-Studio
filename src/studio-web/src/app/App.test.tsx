@@ -255,6 +255,8 @@ describe("useAgentUiStore", () => {
     expect(s.draftPrompt).toBe("");
     expect(s.streamVisible).toBe(false);
     expect(s.expandedProposalIds).toEqual([]);
+    expect(s.messages).toEqual([]);
+    expect(s.isStreaming).toBe(false);
   });
 
   it("sets activeSessionId", () => {
@@ -294,6 +296,61 @@ describe("useAgentUiStore", () => {
       "b",
       "c",
     ]);
+  });
+
+  it("adds messages to the thought log", () => {
+    const store = useAgentUiStore.getState();
+    store.addMessage({
+      role: "agent",
+      text: "Analyzing...",
+      timestamp: "12:00:00",
+    });
+    store.addMessage({
+      role: "tool",
+      text: "read_ir_section -> result",
+      timestamp: "12:00:01",
+    });
+    const s = useAgentUiStore.getState();
+    expect(s.messages).toHaveLength(2);
+    expect(s.messages[0]?.role).toBe("agent");
+    expect(s.messages[1]?.role).toBe("tool");
+  });
+
+  it("clears messages", () => {
+    const store = useAgentUiStore.getState();
+    store.addMessage({
+      role: "agent",
+      text: "test",
+      timestamp: "12:00:00",
+    });
+    expect(useAgentUiStore.getState().messages).toHaveLength(1);
+    store.clearMessages();
+    expect(useAgentUiStore.getState().messages).toEqual([]);
+  });
+
+  it("sets and clears isStreaming", () => {
+    useAgentUiStore.getState().setStreaming(true);
+    expect(useAgentUiStore.getState().isStreaming).toBe(true);
+    useAgentUiStore.getState().setStreaming(false);
+    expect(useAgentUiStore.getState().isStreaming).toBe(false);
+  });
+
+  it("resets messages and isStreaming along with other state", () => {
+    const store = useAgentUiStore.getState();
+    store.setDraftPrompt("test prompt");
+    store.addMessage({
+      role: "error",
+      text: "something failed",
+      timestamp: "12:00:00",
+    });
+    store.setStreaming(true);
+    store.setStreamVisible(true);
+    store.reset();
+    const s = useAgentUiStore.getState();
+    expect(s.draftPrompt).toBe("");
+    expect(s.messages).toEqual([]);
+    expect(s.isStreaming).toBe(false);
+    expect(s.streamVisible).toBe(false);
   });
 });
 
