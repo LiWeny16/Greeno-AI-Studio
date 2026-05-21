@@ -26,25 +26,20 @@ Architecture principle: **frontend is pure UI, backend does all compute.**
 │  NEVER: AI logic, music transforms, heavy calc  │
 │  Tone.js, Konva, lucide-react, Radix            │
 └──────────────────┬──────────────────────────────┘
-                   │ HTTP + WebSocket
+                   │ HTTP + WebSocket (port 8787)
                    ▼
 ┌─────────────────────────────────────────────────┐
-│  Local Bridge (Node/TS/Fastify)                 │
-│  ONLY: route messages, manage project files,    │
-│        spawn/kill Python workers, stream events │
-│  NEVER: AI logic, music transforms, tool calls  │
-└──────────────────┬──────────────────────────────┘
-                   │ subprocess (stdin/stdout JSON)
-                   ▼
-┌─────────────────────────────────────────────────┐
-│  Python Engine (src/workers/python/)            │
-│  ALL HEAVY COMPUTE LIVES HERE:                  │
+│  Python Backend (FastAPI)                       │
+│  ALL COMPUTE LIVES HERE:                        │
+│  • HTTP REST + WebSocket server                 │
 │  • Agent ReAct loop + LLM calling + tools       │
 │  • Music IR transforms (transpose, motif, etc.) │
 │  • MIDI parse/generate                          │
+│  • Project file IO, snapshots, events           │
+│  • Schema validation (Pydantic)                 │
 │  • Model inference (Basic Pitch, ACE-Step, etc) │
 │  • Audio render (FluidSynth)                    │
-│  • Schema validation (Zod-equivalent in Python) │
+│  • Security, origin validation, job queue       │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -65,21 +60,15 @@ cc-music/
           transport/         # Play/stop/seek, BPM/key display
         stores/              # Zustand (UI state only)
         lib/                 # cn helper, API client
-    local-bridge/            # Middleware: thin message router
-      src/
-        api/                 # Fastify HTTP routes
-        projects/            # Project file IO, snapshots, events
-        security/            # Origin validation, token
-        worker-manager.ts    # Spawn/kill/stream Python subprocess
-        server.ts
     workers/
-      python/                # ★ THE ENGINE: all compute lives here
+      python/                # ★ THE BACKEND: FastAPI + all compute
         cc_music/
+          api/               # FastAPI HTTP + WebSocket routes
           agent/             # ReAct loop, LLM adapters, tools
           music/             # Music IR transforms, MIDI IO
           models/            # Model inference adapters (post-MVP)
           schema/            # Pydantic schemas (mirror TS Music IR)
-          server.py          # stdin/stdout JSON-RPC entry point
+          server.py          # FastAPI/uvicorn entry point
         tests/
         pyproject.toml
     packages/
@@ -104,7 +93,7 @@ Use:
 - shadcn/ui-style local components on Radix UI primitives.
 - `lucide-react` for icons.
 - Zustand for **UI state only** (selection, zoom, panel sizes, draft prompt). Never canonical project data.
-- TanStack Query for bridge API fetch/cache/invalidation.
+- TanStack Query for backend API fetch/cache/invalidation.
 - Konva/react-konva for timeline and piano-roll canvases.
 - Tone.js for **playback only** (transport scheduling, synth presets).
 - Playwright for E2E.
@@ -118,42 +107,17 @@ Frontend must NOT:
 
 Detailed UI/UX rules live in `docs/uiux.md`.
 
-### 4.2 Local Bridge (middleware)
+### 4.2 Python Backend (FastAPI)
 
-Thin message router between browser and Python engine. No AI logic.
-
-Use:
-
-- Node.js 24 + TypeScript + Fastify.
-- Zod for request/response validation at HTTP boundary.
-- `better-sqlite3` for project metadata index only (canonical state is files).
-- `execa` for Python subprocess management.
-- WebSocket for streaming Python events to browser.
-- `pino` for structured logging.
-
-Bridge responsibilities:
-- Route HTTP requests from browser to Python worker JSON-RPC calls.
-- Manage project file IO (atomic writes, snapshots, recovery).
-- Spawn Python subprocess, pipe stdin/stdout JSON.
-- Stream Python stdout events to browser via WebSocket.
-- Validate Origin, enforce local token, bind to 127.0.0.1.
-- Redact secrets in logs.
-
-Bridge must NOT:
-- Run AI/LLM inference or tool calls.
-- Execute music transforms or MIDI generation.
-- Parse or generate music data beyond JSON validation.
-
-Same security rules as original (origin validation, atomic writes, per-project locks, process-tree cancellation, log redaction).
-
-### 4.3 Python Engine (workers/python/)
-
-**ALL heavy compute lives here.** This is the real backend.
+The backend is the Python engine. It serves HTTP REST + WebSocket directly — no middleware layer.
 
 Use:
 
 - Python 3.12+ with `uv`.
+- **FastAPI** for HTTP API + WebSocket on port 8787.
+- **uvicorn** as ASGI server.
 - **Pydantic** for all schemas (mirrors TypeScript Music IR — shared JSON fixtures ensure parity).
+- SQLite for project metadata index only (canonical state is files).
 - **Hand-written ReAct loop** (~200 lines). No LangChain, no LangGraph.
 - **Native LLM function calling** via `httpx` to any OpenAI-compatible endpoint.
 - **Adaptable LLM backends**: Claude CLI, Codex CLI, Ollama, vLLM, or any OpenAI-compatible HTTP API.
@@ -161,12 +125,29 @@ Use:
 - `numpy` for music math.
 - Post-MVP: `basic-pitch`, `torch`, `demucs`, `fluidsynth`.
 
+Backend responsibilities:
+- Serve HTTP REST API for project create/load/save, patches, MIDI import/export.
+- Stream agent/job events to browser via WebSocket.
+- Manage project file IO (atomic writes, snapshots, recovery).
+- Run ReAct agent loop directly in FastAPI handlers (same process).
+- Execute music transforms and MIDI generation.
+- Validate Origin, enforce local token, bind to 127.0.0.1.
+- Redact secrets in logs.
+
+Backend must NOT:
+- Serve or bundle a frontend build (Vite dev server handles that).
+
+Same security rules as original (origin validation, atomic writes, per-project locks, process-tree cancellation, log redaction).
+
 Python engine layout:
 
 ```
 src/workers/python/cc_music/
+  api/
+    routes.py           # FastAPI routes
+    websocket.py        # WebSocket handlers
   agent/
-    loop.py            # ReAct loop core
+    loop.py             # ReAct loop core
     tools.py            # Tool definitions + dispatch
     adapters/
       mock.py           # Deterministic mock (default tests)
@@ -177,40 +158,10 @@ src/workers/python/cc_music/
     transforms.py       # Transpose, motif variation, quantize
     midi_io.py          # MIDI import/export
     validate.py         # Schema + lock validation
-  server.py             # stdin/stdout JSON-RPC entry point
+  server.py             # FastAPI/uvicorn entry point
 ```
 
-Bridge ↔ Python protocol (stdin/stdout JSON lines):
-
-```
-Bridge → Python:
-  {"id":"req_001","method":"agent.run","params":{...}}
-  {"id":"req_002","method":"music.transpose","params":{...}}
-  {"id":"req_003","method":"midi.export","params":{...}}
-
-Python → Bridge (one JSON per line):
-  {"type":"stream_event","data":{...}}    (streaming progress)
-  {"type":"result","id":"req_001","data":{...}}  (final)
-  {"type":"error","id":"req_001","error":{...}}  (failure)
-```
-
-MVP Python dependencies:
-
-```
-pydantic
-httpx
-miditoolkit
-numpy
-```
-
-Deferred (post-MVP):
-
-```
-basic-pitch
-torch
-demucs
-fluidsynth
-```
+Frontend communicates with backend via HTTP REST + WebSocket on port 8787.
 
 ## 5. Music IR
 
@@ -254,7 +205,7 @@ UI command
   -> apply
   -> persist atomically
   -> append events.ndjson
-  -> invalidate/refetch bridge queries
+  -> invalidate/refetch API queries
 ```
 
 Do not add quick-edit shortcuts that bypass this pipeline. Canvas drag, inspector edits, AI patches, MIDI import, undo/redo, and transforms all commit through validated commands.
@@ -267,7 +218,7 @@ Project state and render state remain separate:
 
 ## 6. Timeline Engine
 
-`src/packages/timeline-engine` is pure TypeScript and must not depend on React, Fastify, Tone.js, or local filesystem.
+`src/packages/timeline-engine` is pure TypeScript and must not depend on React, Tone.js, or local filesystem.
 
 Responsibilities:
 
@@ -284,21 +235,19 @@ This package is heavily unit tested because it is the product's control layer.
 
 ## 7. Agent Protocol (Python Engine)
 
-Agents are assistants, not autonomous mutators. The ReAct loop runs entirely in the **Python engine** as a subprocess; the bridge only routes messages.
+Agents are assistants, not autonomous mutators. The ReAct loop runs directly in the FastAPI backend process.
 
 ### 7.1 Request Flow
 
 ```text
 Browser prompt
-  → bridge POST /api/projects/:id/agent/messages
-  → bridge sends JSON-RPC to Python: {"method":"agent.run","params":{...}}
-  → Python runs hand-written ReAct loop:
+  → POST /api/projects/:id/agent/messages
+  → FastAPI handler runs hand-written ReAct loop:
        think → call tool → observe → think → ... → finalize
        (LLM calls any OpenAI-compatible endpoint via httpx)
        (tools are Python functions, read-only or produce intermediate artifacts)
-       (each step streams events back via stdout)
-  → Python returns IrPatchProposal (JSON)
-  → bridge validates + returns to browser
+       (each step streams events via WebSocket)
+  → returns IrPatchProposal (JSON)
   → UI shows diff preview
   → user applies/rejects
 ```
@@ -406,7 +355,7 @@ Deterministic ReAct loop for tests. Matches known prompts to fixed tool sequence
 
 ### 7.8 Streaming Protocol
 
-Python emits one JSON line per event to stdout:
+The backend sends events to the browser via WebSocket:
 
 ```json
 {"type":"message","data":{"text":"Analyzing bars 9-16..."}}
@@ -417,13 +366,9 @@ Python emits one JSON line per event to stdout:
 {"type":"error","data":{"code":"timeout","message":"..."}}
 ```
 
-Bridge parses each line, wraps as AgentStreamEvent, and forwards to browser via WebSocket.
+The browser receives these as AgentStreamEvent messages over the WebSocket connection.
 
-- invalid JSON.
-- schema-invalid patch.
-- timeout.
-- cancelled.
-- partial stream then error.
+Failure modes: invalid JSON, schema-invalid patch, timeout, cancelled, partial stream then error.
 
 ## 8. API Surface
 
@@ -631,7 +576,7 @@ Do not block MVP on:
 
 ## 13. Playwright E2E
 
-Playwright starts both frontend and bridge via `webServer` config.
+Playwright starts both frontend and backend via `webServer` config.
 
 Required environment:
 
@@ -664,7 +609,7 @@ Canvas-heavy features require:
 Mocking rule:
 
 - Browser-side Playwright route mocks are not allowed for agent/worker behavior.
-- Tests must exercise the local bridge code path with mock adapters enabled.
+- Tests must exercise the backend code path with mock adapters enabled.
 - Real Codex, Claude, ffmpeg, Basic Pitch, ACE-Step, GPU, and network are excluded from default E2E.
 
 Playwright references:
@@ -676,7 +621,7 @@ Playwright references:
 ## 14. Security Boundaries
 
 - Browser never launches commands.
-- Local bridge only runs allowlisted subprocess adapters.
+- Backend only runs allowlisted subprocess adapters.
 - Subprocess cwd is restricted to workspace/project directories.
 - Destructive operations require explicit user confirmation.
 - Real external tools are optional capabilities.
@@ -829,16 +774,16 @@ Refs/services:
 
 ## 19. Backend Performance Standard
 
-The local bridge should stay boring and fast.
+The Python backend should stay boring and fast.
 
 Rules:
 
-- Keep Fastify plugins minimal.
+- Keep FastAPI dependency injection minimal.
 - Keep API handlers thin: validate -> service -> typed response.
-- Use `app.inject()` tests for backend routes.
+- Use `TestClient` / `httpx.AsyncClient` tests for backend routes.
 - Keep SQLite writes short and explicit.
 - Store large assets as files, not SQLite blobs.
-- Stream agent/job events; do not poll.
+- Stream agent/job events via WebSocket; do not poll.
 - Use backpressure-aware streams for logs/output.
 - Limit concurrent jobs globally and per project.
 - Cache capability detection for a short TTL.
@@ -857,7 +802,7 @@ heavy post-MVP model jobs: concurrency 1 globally by default
 
 Threat model:
 
-- A malicious web page tries to call the local bridge.
+- A malicious web page tries to call the local backend.
 - An agent emits dangerous commands or malformed patches.
 - A file upload tries path traversal or zip-like expansion later.
 - A worker tries to read/write outside the project.
@@ -899,7 +844,7 @@ Telemetry:
 Recommended project license:
 
 ```text
-AGPL-3.0-or-later for the application and local bridge.
+AGPL-3.0-or-later for the application and backend.
 ```
 
 Why:
@@ -960,29 +905,16 @@ react-konva
 tone
 ```
 
-Backend app dependencies:
+Python backend dependencies (pyproject.toml):
 
 ```text
-fastify
-@fastify/multipart
-@fastify/static
-@fastify/websocket
-fastify-type-provider-zod
-pino
-zod
-better-sqlite3
-execa
-p-queue
-nanoid
-```
-
-Python engine dependencies (pyproject.toml):
-
-```text
+fastapi
+uvicorn
 pydantic
 httpx
 miditoolkit
 numpy
+websockets
 ```
 
 Defer until needed:
@@ -1052,7 +984,7 @@ Use them this way:
 - `shadcn-ui`: local component style.
 - `lucide`: icon set.
 - `zustand`: state management patterns.
-- `fastify`: plugin/server patterns.
+- `fastapi`: Python web framework patterns.
 - `basic-pitch`: post-MVP audio-to-MIDI adapter.
 - `waveform-playlist`: multitrack WebAudio editor reference.
 - `ace-step-ui` and `ace-step-1.5`: post-MVP audio generation references.

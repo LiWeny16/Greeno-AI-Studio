@@ -81,7 +81,7 @@ These can become optional adapters later, but they must not block the first cont
 - Undo/redo works for 100% of AI actions.
 - Project can be used fully offline after setup.
 - First demo proves: create motif, vary it, arrange sections, export MIDI to a DAW.
-- Project save/load survives bridge restart and can recover from latest valid snapshot if `project.json` is corrupt.
+- Project save/load survives backend restart and can recover from latest valid snapshot if `project.json` is corrupt.
 - Default telemetry is none; only local redacted diagnostics logs exist in MVP.
 
 ## 5. Competitor Map
@@ -284,7 +284,7 @@ Frontend:
 - shadcn/ui-style local components built on Radix UI primitives.
 - `lucide-react` for icons.
 - Zustand for local editor/session state.
-- TanStack Query for bridge API state.
+- TanStack Query for backend API state.
 - React Hook Form + Zod resolver for forms.
 - Konva/react-konva for timeline and piano roll.
 - Tone.js and `@tonejs/midi` for playback and MIDI IO.
@@ -292,28 +292,28 @@ Frontend:
 
 UI/UX rules are specified in `docs/uiux.md`.
 
-Local bridge:
+Python backend:
 
-- Node.js 24 Active LTS preferred; Node.js 22 Maintenance LTS supported while dependency compatibility requires it.
-- TypeScript.
-- Fastify for HTTP API.
-- `@fastify/websocket` for job/agent streaming.
-- Zod for request/response validation.
-- `better-sqlite3` for project index, jobs, snapshots metadata.
-- `execa` for subprocess adapters.
-- `p-queue` or equivalent for job concurrency and per-project write locks.
+- Python 3.12+ with `uv`.
+- FastAPI for HTTP API + WebSocket on port 8787.
+- uvicorn as ASGI server.
+- Pydantic for all schemas and request/response validation.
+- SQLite for project index, jobs, snapshots metadata.
+- Hand-written ReAct loop (~200 lines) for agent integration.
+- httpx for LLM calls to any OpenAI-compatible endpoint.
+- miditoolkit / numpy for MIDI IO and music math.
 - Filesystem project folders for project data and exported assets.
-- Subprocess adapters for Codex, Claude, Python workers, and future model tools.
+- All compute (agent, transforms, MIDI IO) runs in one FastAPI process.
 
 Workers:
 
-- MVP: Python engine for all compute (agent, transforms, MIDI IO). TypeScript timeline-engine for bar/beat math and selection only.
-- Phase 2: Python workers for Basic Pitch, FluidSynth/ffmpeg render, audio analysis.
+- MVP: Python backend handles all compute. TypeScript timeline-engine for bar/beat math and selection only.
+- Phase 2: Python adapters for Basic Pitch, FluidSynth/ffmpeg render, audio analysis.
 - Phase 3: ACE-Step, Demucs, image-to-music-brief, and other optional heavy adapters.
 
-## 10. Agent Integration (Python Engine)
+## 10. Agent Integration (Python Backend)
 
-Browser never launches agents. Bridge never runs AI. **All agent intelligence lives in Python.**
+Browser never launches agents. **All agent intelligence lives in the Python backend.**
 
 ### 10.1 Architecture
 
@@ -321,17 +321,14 @@ Browser never launches agents. Bridge never runs AI. **All agent intelligence li
 Browser (React)
   │  POST /api/projects/:id/agent/messages
   ▼
-Bridge (Node/Fastify)
-  │  JSON-RPC over stdin/stdout to Python subprocess
-  ▼
-Python Engine (cc_music/agent/)
-  │  Hand-written ReAct loop (~200 lines)
+Python Backend (FastAPI)
+  │  Hand-written ReAct loop runs directly in request handler
   │  LLM calls via httpx to any OpenAI-compatible endpoint
   │  10 music-domain tools as Python functions
   │  Pydantic schemas mirror TypeScript Music IR
-  │  Streams events back over stdout
+  │  Streams thought log events via WebSocket
   ▼
-Bridge validates + returns IrPatchProposal to browser
+FastAPI validates + returns IrPatchProposal to browser
   ▼
 UI shows diff → user applies/rejects
 ```
@@ -379,8 +376,8 @@ while iteration < max_iterations:
 - Max 10 ReAct iterations
 - Max 5 tool calls per step
 - 30s timeout (120s for complex)
-- Python subprocess killed on timeout/cancel
-- No filesystem write access outside temp dir
+- ReAct loop cancelled on timeout
+- No filesystem write access outside project/temp dir
 - All patches Pydantic-validated before returning
 
 Default test mode uses `mock-agent` with deterministic tool outputs.
@@ -392,7 +389,7 @@ Default test mode uses `mock-agent` with deterministic tool outputs.
 - Initialize git if missing and add root ignore rules.
 - pnpm workspace.
 - React app.
-- Node local bridge.
+- Python backend.
 - Shared packages.
 - Vitest + Playwright.
 - `CLAUDE.md` and `AGENTS.md`.
@@ -403,7 +400,7 @@ Default test mode uses `mock-agent` with deterministic tool outputs.
 
 Done:
 
-- `pnpm dev` boots app and bridge.
+- `pnpm dev` boots app and backend.
 - `pnpm test` runs unit tests.
 - Playwright smoke test opens the workbench.
 - `pnpm typecheck` exists and passes.
@@ -459,12 +456,11 @@ Done:
 - Hand-written ReAct loop in Python (~200 lines). No LangGraph, no LangChain.
 - 10 music-domain tools as Python functions. Native OpenAI-compatible function calling via httpx.
 - LLM backends: Mock (deterministic), Claude CLI, Codex CLI, any OpenAI-compatible endpoint (Ollama/vLLM).
-- Bridge ↔ Python JSON-RPC over stdin/stdout. Bridge only routes messages.
-- Streaming thought log: each ReAct step emitted as JSON event to stdout, forwarded to browser.
+- Agent loop runs directly in FastAPI handlers, streaming thought log via WebSocket.
 - Self-validation: Pydantic schema + lock checks before returning proposal.
 - Mock agent implements full ReAct loop with deterministic tool outputs for tests.
 - Diff preview + Apply/Reject with undo/redo.
-- Safety: max 10 iterations, max 5 tool calls per step, 30s timeout, no filesystem writes.
+- Safety: max 10 iterations, max 5 tool calls per step, 30s timeout, no filesystem writes outside project dir.
 
 Done:
 - Mock ReAct agent returns valid patch with visible reasoning steps.
@@ -505,7 +501,7 @@ Post-MVP adapters must implement the same job contract and have mock workers fir
 
 License decision:
 
-- Use `AGPL-3.0-or-later` for the app and local bridge.
+- Use `AGPL-3.0-or-later` for the app and backend.
 - Keep dependencies under their upstream licenses.
 - Consider dual licensing only if future commercial embedding becomes important.
 
@@ -513,7 +509,7 @@ Open-source core:
 
 - Editor.
 - Music IR.
-- Local bridge.
+- Python backend.
 - Mock workers.
 - MIDI generation/transforms.
 - Project format.

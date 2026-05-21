@@ -18,9 +18,7 @@
     "paths": {
       "@cc-music/agent-protocol": ["src/packages/agent-protocol/src/index.ts"],
       "@cc-music/music-ir": ["src/packages/music-ir/src/index.ts"],
-      "@cc-music/test-fixtures": ["src/packages/test-fixtures/src/index.ts"],
-      "@cc-music/timeline-engine": ["src/packages/timeline-engine/src/index.ts"],
-      "@cc-music/tool-registry": ["src/packages/tool-registry/src/index.ts"]
+      "@cc-music/timeline-engine": ["src/packages/timeline-engine/src/index.ts"]
     },
     "resolveJsonModule": true,
     "skipLibCheck": true,

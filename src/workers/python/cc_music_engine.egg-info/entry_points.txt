@@ -1,0 +1,2 @@
+[console_scripts]
+cc-music-server = cc_music.main:main

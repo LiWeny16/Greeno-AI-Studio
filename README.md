@@ -7,13 +7,15 @@ Local-first, open-source AI MIDI editor for structured composition.
 ## Architecture
 
 ```
-Browser (React/TS)  →  Bridge (Node/Fastify)  →  Python Engine
-  Pure UI only          Message router            All compute
-  • Timeline            • Project file IO         • ReAct agent loop
-  • Piano roll          • Subprocess manager      • LLM tool calling
-  • Inspector           • Security / auth         • Music transforms
-  • Agent panel         • WebSocket streams       • MIDI import/export
-  • Playback (Tone.js)                            • Schema validation
+Browser (React/TS)  ── HTTP + WebSocket ──→  Python Backend (FastAPI)
+  Pure UI only                                All compute in one process
+  • Timeline                                  • HTTP REST + WebSocket server
+  • Piano roll                                • ReAct agent loop
+  • Inspector                                 • LLM tool calling
+  • Agent panel                               • Music transforms
+  • Playback (Tone.js)                        • MIDI import/export
+                                              • Project file IO
+                                              • Schema validation (Pydantic)
 ```
 
 ## MVP Core Loop
@@ -28,22 +30,21 @@ Create project → Arrange sections → Enter motif → Ask AI for variation
 | Layer | Technology |
 |---|---|
 | Frontend | React 19, TypeScript, Vite, Tailwind, Konva, Tone.js, Zustand |
-| Bridge | Node.js 24, Fastify, Zod, SQLite, WebSocket |
-| Python Engine | Python 3.12+, Pydantic, httpx, miditoolkit, numpy |
+| Backend | Python 3.12+, FastAPI, uvicorn, Pydantic, SQLite, WebSocket |
 | AI Agent | Hand-written ReAct loop (~200 lines), no frameworks |
 | Tests | Vitest, Playwright, pytest |
 
 ## Getting Started
 
 ```bash
-# Frontend + Bridge
+# Frontend
 pnpm install
-pnpm dev          # starts Vite + Fastify bridge
+pnpm dev          # starts Vite dev server
 
-# Python Engine
+# Python Backend
 cd src/workers/python
 uv sync
-uv run python -m cc_music.server
+uv run python -m cc_music.server    # starts FastAPI on port 8787
 ```
 
 ## Project Structure
@@ -51,11 +52,12 @@ uv run python -m cc_music.server
 ```
 src/
   studio-web/        # Frontend: pure UI
-  local-bridge/      # Bridge: message router + file IO
-  workers/python/    # Python Engine: ALL compute
+  workers/python/    # Python Backend: FastAPI + ALL compute
     cc_music/
+      api/           # HTTP + WebSocket routes
       agent/         # ReAct loop, tools, LLM adapters
       music/         # Music IR models, transforms, MIDI IO
+      schema/        # Pydantic schemas
   packages/          # Shared TS schemas + fixtures
 ```
 

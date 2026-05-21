@@ -6,7 +6,6 @@
     { "path": "./src/packages/agent-protocol" },
     { "path": "./src/packages/tool-registry" },
     { "path": "./src/packages/test-fixtures" },
-    { "path": "./src/local-bridge" },
     { "path": "./src/studio-web" }
   ]
 }

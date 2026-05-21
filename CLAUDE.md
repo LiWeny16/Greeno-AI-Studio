@@ -68,17 +68,16 @@
 - Use shadcn/ui-style local components, Radix primitives, and lucide-react icons.
 - Do not add MUI, Ant Design, Chakra, Mantine, Redux, MobX, XState, Next.js, Electron, or Tauri in MVP.
 
-## Node Bridge
+## Python Backend
 
 - Validate every request and response.
-- Keep subprocess execution behind adapters.
-- Use allowlisted commands.
 - Require exact Origin validation and local token for HTTP and WebSocket browser calls.
 - Reject wildcard CORS, `Origin: null`, and absent browser Origin.
-- Use resolved executable allowlists, argument arrays, minimal env, byte-limited output, and process-tree cancellation for subprocesses.
+- Use resolved executable allowlists, argument arrays, minimal env, byte-limited output, and process-tree cancellation for subprocess adapters.
 - Keep project file writes versioned and reversible.
-- Stream job and agent events through typed messages.
+- Stream job and agent events through typed WebSocket messages.
 - Browser never launches local CLI tools directly.
+- Backend serves HTTP REST + WebSocket on port 8787 via FastAPI/uvicorn.
 
 ## Workers
 

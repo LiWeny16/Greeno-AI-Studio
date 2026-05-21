@@ -8,8 +8,8 @@
     "node": ">=24.0.0 <25.0.0"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter @cc-music/local-bridge --filter @cc-music/studio-web dev",
-    "dev:bridge": "pnpm --filter @cc-music/local-bridge dev",
+    "dev": "pnpm --filter @cc-music/studio-web dev",
+    "dev:bridge": "cd src/workers/python && uv run uvicorn cc_music.http_app:app --host 127.0.0.1 --port 8787",
     "dev:web": "pnpm --filter @cc-music/studio-web dev",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",

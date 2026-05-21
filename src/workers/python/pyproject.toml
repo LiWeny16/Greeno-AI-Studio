@@ -8,13 +8,21 @@ dependencies = [
     "httpx>=0.27",
     "miditoolkit>=1.0",
     "numpy>=2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "websockets>=13",
+    "python-multipart>=0.0.12",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "httpx>=0.27",
 ]
+
+[project.scripts]
+cc-music-server = "cc_music.main:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

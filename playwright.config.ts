@@ -12,13 +12,12 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "pnpm --filter @cc-music/local-bridge start",
+      command: "cd src/workers/python && uv run uvicorn cc_music.http_app:app --host 127.0.0.1 --port 8787",
       env: {
         CC_MUSIC_AGENT_ADAPTER: "mock",
         CC_MUSIC_PROJECT_ROOT: projectRoot,
         CC_MUSIC_TEST_MODE: "mocked",
-        CC_MUSIC_WORKERS: "mock",
-        PORT: "8787"
+        CC_MUSIC_WORKERS: "mock"
       },
       port: 8787,
       reuseExistingServer: !process.env.CI
