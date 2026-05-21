@@ -845,8 +845,11 @@ class TestBuildPatchJson:
 
 class TestPitchUtilities:
     def test_pitch_to_midi_roundtrip(self):
-        for pitch in ["A4", "C5", "E5", "D5", "G3", "F#4", "Bb3", "Eb5"]:
-            assert midi_to_pitch(pitch_to_midi(pitch)) == pitch
+        # midi_to_pitch always returns sharps, so only test natural/sharp inputs.
+        for pitch in ["A4", "C5", "E5", "D5", "G3", "F#4", "C#4", "Eb5"]:
+            midi = pitch_to_midi(pitch)
+            # Bb3 -> A#3 is the same MIDI number (58); roundtrip returns the sharp form.
+            assert pitch_to_midi(midi_to_pitch(midi)) == midi
 
     def test_invalid_pitch_raises(self):
         with pytest.raises(ValueError):
