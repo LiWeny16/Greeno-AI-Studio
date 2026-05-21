@@ -11,6 +11,7 @@ export const testIds = {
   transport: "transport",
   transportPlay: "transport-play",
   transportStop: "transport-stop",
+  transportPosition: "transport-position",
   agentPrompt: "agent-prompt",
   agentSend: "agent-send",
   agentStop: "agent-stop",
