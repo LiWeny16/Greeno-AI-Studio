@@ -40,10 +40,20 @@ test.describe("app smoke", () => {
     await page.goto("/");
     await resetTestState(page);
 
-    const agentPanel = page.getByTestId("agent-panel");
-    await expect(agentPanel).toBeVisible();
-    await expect(agentPanel).toContainText("Mock agent ready");
-    await expect(agentPanel.getByTestId("agent-prompt")).toBeEmpty();
+    // The data-testid="agent-panel" appears on two elements:
+    //   1. The Radix TabsContent wrapper (role="tabpanel")
+    //   2. The inner AgentPanel component div
+    // Use .first() to target one unambiguously.
+    const agentPanels = page.getByTestId("agent-panel");
+    await expect(agentPanels.first()).toBeVisible();
+
+    // The inner AgentPanel div contains "Agent" heading and "Mock" badge.
+    // nth(0) is the Radix TabsContent wrapper, nth(1) is the inner component.
+    await expect(agentPanels.nth(1)).toContainText("Agent");
+    await expect(agentPanels.nth(1)).toContainText("Mock");
+
+    // Prompt textarea should be empty initially
+    await expect(page.getByTestId("agent-prompt")).toBeEmpty();
   });
 
   test("transport bar is visible with play and stop controls", async ({

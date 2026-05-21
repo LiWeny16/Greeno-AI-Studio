@@ -275,20 +275,28 @@ This package is heavily unit tested because it is the product's control layer.
 
 Agents are implementation assistants, not autonomous file mutators.
 
+The adapter runs a **ReAct loop** (Reason + Act) orchestrated by **LangGraph**, but the external contract stays the same: one AgentRequest in, one IrPatchProposal out, user approves before any mutation.
+
 ### 7.1 Request Flow
 
 ```text
 User prompt
   -> studio-web sends AgentRequest
   -> local-bridge loads project snapshot
-  -> local-bridge builds constrained prompt
-  -> mock/codex/claude adapter runs
-  -> adapter emits AgentStreamEvents
+  -> local-bridge builds structured system prompt with Music IR context
+  -> adapter runs LangGraph ReAct loop (internal, multi-step):
+       ┌─────────────────────────────────────────────────┐
+       │  AnalyzeRequest → Plan → ToolCall → Observe →   │
+       │  GeneratePatch → SelfValidate → RefineOrFinalize │
+       └─────────────────────────────────────────────────┘
+       Each thought/action/observation emitted as AgentStreamEvent
   -> adapter returns IrPatchProposal
   -> Zod validation
   -> UI diff preview
   -> user applies/rejects
 ```
+
+The ReAct loop is an **adapter-internal implementation detail**. The external API surface (AgentRequest → AgentStreamEvents → IrPatchProposal) is unchanged. The agent cannot write to project files; tools are read-only or produce intermediate artifacts.
 
 ### 7.2 Agent Request
 
@@ -332,23 +340,200 @@ User prompt
 }
 ```
 
-### 7.4 Local Codex Adapter
+### 7.4 LangGraph ReAct Loop Architecture
 
-Local command discovered:
+The agent adapter uses **LangGraph** (TypeScript, `@langchain/langgraph`) to orchestrate a stateful ReAct loop. The graph is a directed state machine with conditional edges. The loop runs entirely inside the bridge process — the browser only sees stream events and the final proposal.
 
-```text
-codex exec
+#### 7.4.1 Agent State
+
+```typescript
+interface AgentState {
+  // Immutable context
+  projectSnapshot: MusicIr;
+  userPrompt: string;
+  selection: AgentSelection;
+  
+  // ReAct loop state
+  messages: BaseMessage[];        // LLM conversation history
+  currentStep: string;            // current graph node name
+  iterationCount: number;         // safety limit
+  
+  // Intermediate artifacts
+  analysis?: MusicAnalysis;       // structured analysis of target bars
+  plan?: EditPlan;                // sequence of intended edits
+  intermediatePatch?: IrPatchProposal;  // draft patch (may be refined)
+  
+  // Terminal output
+  finalProposal?: IrPatchProposal;
+  error?: AgentError;
+}
 ```
 
-Adapter responsibilities:
+#### 7.4.2 Graph Nodes
 
-- Run with project cwd.
-- Use `--cd <workspace>` when needed.
-- Force prompt to return JSON only.
-- Reject output that fails schema validation.
-- Do not apply Codex diffs directly in MVP agent mode.
+```text
+                    ┌──────────┐
+                    │  START   │
+                    └────┬─────┘
+                         │
+                    ┌────▼─────┐
+                    │ ANALYZE  │ ← LLM: analyze selection, identify patterns
+                    └────┬─────┘
+                         │
+                    ┌────▼─────┐
+                    │  PLAN    │ ← LLM: decide which edit tools to call
+                    └────┬─────┘
+                         │
+              ┌──────────▼──────────┐
+              │    TOOL_EXECUTE     │ ← Execute tool calls, collect results
+              └──────────┬──────────┘
+                         │
+                    ┌────▼─────┐
+                    │ OBSERVE  │ ← LLM: interpret tool results, decide next action
+                    └────┬─────┘
+                         │
+              ┌──────────┼──────────┐
+              │          │          │
+         need_more    confident   max_iter
+              │          │          │
+              ▼          ▼          ▼
+         back to    GENERATE_PATCH  │
+         PLAN       │               │
+                    ▼               ▼
+              SELF_VALIDATE    FINALIZE_ERROR
+                    │
+              ┌─────┼─────┐
+              │           │
+          passes       fails
+              │           │
+              ▼           ▼
+         FINALIZE    back to PLAN
+              │       (with validation errors)
+              ▼
+           END
+```
 
-### 7.5 Local Claude Adapter
+**Nodes:**
+
+| Node | Role | LLM? | Tools? |
+|---|---|---|---|
+| `ANALYZE` | Examine selected bars: motifs, chords, rhythm patterns, energy curve | Yes | `read_ir_section`, `analyze_motif` |
+| `PLAN` | Decide which edits to make, in what order | Yes | None (reasoning only) |
+| `TOOL_EXECUTE` | Run planned tool calls deterministically | No | All registered tools |
+| `OBSERVE` | Feed tool results back to LLM, decide: continue refining or proceed? | Yes | None (reasoning only) |
+| `GENERATE_PATCH` | Convert plan + tool results into structured `IrPatchProposal` JSON | Yes | `build_patch_json` (non-LLM post-process) |
+| `SELF_VALIDATE` | Validate generated patch against schema, locks, and musical constraints | No | `validate_patch_schema`, `check_lock_violations` |
+| `FINALIZE` | Emit final proposal stream event, return result | No | None |
+| `FINALIZE_ERROR` | Emit structured error with diagnostics | No | None |
+
+#### 7.4.3 Safety Limits
+
+- `maxIterations`: 10 (configurable). Exceeding returns partial result + error.
+- `maxToolCallsPerStep`: 5.
+- `maxLLMTokensPerCall`: 4096 input, 2048 output.
+- `timeoutMs`: 30000 default (MVP), 120000 for complex sessions.
+
+#### 7.4.4 Streaming to UI
+
+Each node transition emits an `AgentStreamEvent`:
+
+```json
+{"type": "started", "requestId": "req_001", "timestamp": "..."}
+{"type": "message", "requestId": "req_001", "message": "Analyzing bars 9-16: found motif_main (A4-C5-E5-D5 pattern), energy 0.35, genre 'minimal piano'"}
+{"type": "message", "requestId": "req_001", "message": "Plan: darken genre, raise energy to 0.65, add bassline, preserve motif contour"}
+{"type": "message", "requestId": "req_001", "message": "Generated variation: added bass D3-F3-G3, replaced piano with dark pad, velocity +0.15"}
+{"type": "message", "requestId": "req_001", "message": "Self-validation: patch valid, no lock violations, 12 notes added, 0 removed"}
+{"type": "proposal", "requestId": "req_001", "proposal": { ... }}
+{"type": "completed", "requestId": "req_001", "timestamp": "..."}
+```
+
+UI renders `message` events as a streaming thought log so the user sees the agent's reasoning.
+
+### 7.5 Agent Tools (Function Calling)
+
+Tools are music-domain-specific functions the LLM can invoke during the ReAct loop. All tools are **read-only or produce intermediate artifacts** — none can write to project files.
+
+#### 7.5.1 Tool Registry
+
+```typescript
+interface AgentTool {
+  name: string;
+  description: string;           // LLM-readable description for function calling
+  parameters: ZodSchema;         // JSON Schema for LLM function call args
+  execute: (args: unknown, ctx: ToolContext) => Promise<ToolResult>;
+  readOnly: boolean;             // true = no side effects, false = produces artifact
+}
+
+interface ToolContext {
+  projectSnapshot: MusicIr;
+  selection: AgentSelection;
+  workingDir: string;            // temp dir for intermediate artifacts
+}
+
+interface ToolResult {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+  artifacts?: string[];          // paths to generated files (MIDI previews, etc.)
+}
+```
+
+#### 7.5.2 MVP Tool Set
+
+| Tool | ReadOnly | Description |
+|---|---|---|
+| `read_ir_section` | Yes | Return full Music IR for a bar range or section: notes, motifs, chords, style, locks |
+| `analyze_motif` | Yes | Extract motif properties: pitch contour, rhythm pattern, interval structure, register |
+| `analyze_chord_progression` | Yes | Identify chord progression in a section, detect cadences |
+| `generate_motif_variation` | No | Create a new motif variant (transpose, invert, rhythm change, etc.) — returns a Motif candidate, does NOT write to project |
+| `generate_counter_melody` | No | Create a counter-melody line against an existing motif |
+| `generate_bassline` | No | Create a bassline following the chord progression |
+| `generate_drum_pattern` | No | Create a rhythm pattern for a drum track |
+| `validate_patch_schema` | Yes | Run Zod validation on a candidate patch, return errors if any |
+| `check_lock_violations` | Yes | Verify a candidate patch does not violate section/note locks |
+| `build_patch_json` | No | Assemble tool outputs into a properly formatted `IrPatchProposal` |
+| `render_preview_midi` | No | Synthesize candidate notes to a temp MIDI file for reference (lightweight, mock in tests) |
+
+#### 7.5.3 Tool Execution Model
+
+Tools run as **subprocess calls** on the bridge, same as other workers. Each tool gets:
+- Typed input (Zod-validated)
+- Sandboxed working directory (temp, cleaned up after session)
+- Byte-limited output
+- Timeout (10s default for analysis tools, 30s for generation tools)
+
+The LLM sees tool definitions as JSON Schema function declarations and can request tool calls as part of its response. The `TOOL_EXECUTE` node dispatches calls, collects results, and feeds them back in the next LLM turn.
+
+### 7.6 LangGraph Implementation
+
+Use `@langchain/langgraph` (TypeScript) with `@langchain/anthropic` for Claude or `@langchain/openai` for Codex as the LLM backend.
+
+```
+src/local-bridge/src/agent/
+  graph.ts              — LangGraph state machine definition (nodes + edges)
+  state.ts              — AgentState type + initial state factory
+  tools/
+    index.ts            — tool registry + dispatch
+    read-ir.ts          — read_ir_section, analyze_motif, analyze_chord_progression
+    generate.ts         — generate_motif_variation, generate_counter_melody, etc.
+    validate.ts         — validate_patch_schema, check_lock_violations
+    build-patch.ts      — build_patch_json, render_preview_midi
+  adapters/
+    mock.ts             — deterministic mock agent (no LLM, fixed tool outputs)
+    claude.ts           — Claude adapter (LangChain Anthropic backend)
+    codex.ts            — Codex adapter (LangChain OpenAI-compatible backend)
+```
+
+### 7.7 Mock Agent (ReAct Mode)
+
+The mock agent simulates a ReAct loop without requiring an LLM:
+
+- Matches known prompt patterns to deterministic tool call sequences
+- Returns pre-defined `AgentStreamEvent` sequences (analyze → plan → generate → validate → finalize)
+- Supports failure fixtures: invalid tool output, schema-invalid patch, timeout, max iterations exceeded
+- Verifies that the graph itself executes correctly
+
+### 7.8 Local Claude Adapter
 
 Local command supports:
 
@@ -359,17 +544,25 @@ claude --json-schema <schema>
 ```
 
 Adapter responsibilities:
+- Wrap Claude in a LangGraph-compatible LLM interface
+- Pass tool definitions as function calling schema
+- Parse Claude's tool call requests into `TOOL_EXECUTE` dispatch
+- Stream Claude's thinking as `AgentStreamEvent` messages
+- Fall back to `--print --output-format stream-json` if LangGraph is not available
 
-- Prefer `--print --output-format stream-json` for streaming UI.
-- Use `--json-schema` for structured `IrPatchProposal` output.
-- Use `--permission-mode`/tool restrictions so Claude cannot mutate files for proposal-only tasks.
-- Treat non-schema output as adapter failure and surface repair option.
+### 7.9 Local Codex Adapter
 
-### 7.6 Mock Agent
+Local command:
 
-The mock agent is mandatory and used by default in tests.
+```text
+codex exec
+```
 
-It returns deterministic patches for known prompts and supports failure fixtures:
+Adapter responsibilities:
+- Same LangGraph integration as Claude adapter
+- Use OpenAI-compatible function calling for tools
+- Force JSON output mode for structured responses
+- Reject non-schema output as adapter failure
 
 - invalid JSON.
 - schema-invalid patch.
@@ -926,6 +1119,10 @@ better-sqlite3
 execa
 p-queue
 nanoid
+@langchain/langgraph
+@langchain/core
+@langchain/anthropic
+@langchain/openai
 ```
 
 Test/dev dependencies:

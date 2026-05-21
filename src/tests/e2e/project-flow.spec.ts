@@ -6,8 +6,8 @@ import {
   apiListProjects,
   apiPreviewPatch,
   apiUpdateProjectIr,
+  createAndSeedProject,
   resetTestState,
-  seedTestProject,
 } from "./helpers";
 
 test.describe("project flow", () => {
@@ -37,7 +37,7 @@ test.describe("project flow", () => {
     expect(found).toBe(true);
   });
 
-  test("update BPM, key, and time signature — changes persist", async ({
+  test("update BPM, key, and time signature -- changes persist", async ({
     page,
   }) => {
     await page.goto("/");
@@ -76,8 +76,8 @@ test.describe("project flow", () => {
     await page.goto("/");
     await resetTestState(page);
 
-    const { manifest, project } = await seedTestProject(page);
-    const projectId = manifest.projectId;
+    // Create a real project on disk with seeded sections
+    const { projectId } = await createAndSeedProject(page);
 
     const result = await apiPreviewPatch(page, projectId, {
       summary: "Test: change genre",
@@ -106,8 +106,7 @@ test.describe("project flow", () => {
     await page.goto("/");
     await resetTestState(page);
 
-    const { manifest } = await seedTestProject(page);
-    const projectId = manifest.projectId;
+    const { projectId } = await createAndSeedProject(page);
 
     // Verify original genre
     const before = await apiGetProject(page, projectId);
@@ -139,14 +138,15 @@ test.describe("project flow", () => {
     expect(sectionsAfter[0]?.style.genre).toBe("dark ambient");
   });
 
-  test("schema-invalid patch is rejected by the bridge", async ({ page }) => {
+  test("schema-invalid patch is rejected by the bridge", async ({
+    page,
+  }) => {
     await page.goto("/");
     await resetTestState(page);
 
-    const { manifest } = await seedTestProject(page);
-    const projectId = manifest.projectId;
+    const { projectId } = await createAndSeedProject(page);
 
-    // Attempt to replace sections with a non-array value — should fail schema validation
+    // Attempt to replace sections with a non-array value -- should fail schema validation
     let failed = false;
     try {
       await apiPreviewPatch(page, projectId, {

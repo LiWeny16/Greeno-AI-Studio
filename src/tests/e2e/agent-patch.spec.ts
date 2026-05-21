@@ -1,11 +1,10 @@
 import { expect, test } from "@playwright/test";
 import {
   apiApplyPatch,
-  apiCreateProject,
   apiGetProject,
   apiPreviewPatch,
+  createAndSeedProject,
   resetTestState,
-  seedTestProject,
 } from "./helpers";
 
 test.describe("agent patch", () => {
@@ -15,9 +14,10 @@ test.describe("agent patch", () => {
     await page.goto("/");
     await resetTestState(page);
 
-    // Verify agent panel is visible
-    const agentPanel = page.getByTestId("agent-panel");
-    await expect(agentPanel).toBeVisible();
+    // The agent-panel testid exists on both the tabpanel wrapper and the
+    // inner AgentPanel component. Use .first() to target one.
+    const agentPanels = page.getByTestId("agent-panel");
+    await expect(agentPanels.first()).toBeVisible();
 
     // Prompt textarea exists
     const promptTextarea = page.getByTestId("agent-prompt");
@@ -46,8 +46,6 @@ test.describe("agent patch", () => {
 
     // Click send (exercises the button; Zustand draft state updates)
     await sendButton.click();
-    // After sending, the prompt textarea may or may not clear depending on UI logic
-    // For now, we verify the click did not throw
   });
 
   test("patch preview via bridge returns valid proposal for seeded project", async ({
@@ -56,8 +54,10 @@ test.describe("agent patch", () => {
     await page.goto("/");
     await resetTestState(page);
 
-    const { manifest } = await seedTestProject(page);
-    const projectId = manifest.projectId;
+    // Create a real project on disk with sections
+    const { projectId, ir } = await createAndSeedProject(page);
+    const sections = ir.sections as Array<{ style: { genre: string } }>;
+    expect(sections[0]?.style.genre).toBe("minimal piano");
 
     // Call the bridge preview endpoint directly (exercises real code path)
     const result = await apiPreviewPatch(page, projectId, {
@@ -86,11 +86,11 @@ test.describe("agent patch", () => {
     expect(result.proposal.summary).toBe("Agent patch: restyle section A");
 
     // previewIr should reflect changes
-    const sections = result.previewIr.sections as Array<{
+    const previewSections = result.previewIr.sections as Array<{
       style: { genre: string; energy: number };
     }>;
-    expect(sections[0]?.style.genre).toBe("dark cinematic");
-    expect(sections[0]?.style.energy).toBe(0.75);
+    expect(previewSections[0]?.style.genre).toBe("dark cinematic");
+    expect(previewSections[0]?.style.energy).toBe(0.75);
   });
 
   test("apply patch via bridge mutates project IR and creates snapshot", async ({
@@ -99,12 +99,8 @@ test.describe("agent patch", () => {
     await page.goto("/");
     await resetTestState(page);
 
-    const { manifest } = await seedTestProject(page);
-    const projectId = manifest.projectId;
-
-    // Verify original state
-    const before = await apiGetProject(page, projectId);
-    const beforeSections = before.ir.sections as Array<{
+    const { projectId, ir } = await createAndSeedProject(page);
+    const beforeSections = ir.sections as Array<{
       style: { genre: string };
     }>;
     expect(beforeSections[0]?.style.genre).toBe("minimal piano");
@@ -138,9 +134,7 @@ test.describe("agent patch", () => {
     await page.goto("/");
     await resetTestState(page);
 
-    // Create a fresh project with sections (using the seeded project pattern)
-    const { manifest } = await seedTestProject(page);
-    const projectId = manifest.projectId;
+    const { projectId } = await createAndSeedProject(page);
 
     // Preview patch
     const preview = await apiPreviewPatch(page, projectId, {
@@ -178,8 +172,7 @@ test.describe("agent patch", () => {
     await page.goto("/");
     await resetTestState(page);
 
-    const { manifest } = await seedTestProject(page);
-    const projectId = manifest.projectId;
+    const { projectId } = await createAndSeedProject(page);
 
     let errorCaught = false;
     try {
@@ -199,15 +192,15 @@ test.describe("agent patch", () => {
     expect(errorCaught).toBe(true);
   });
 
-  test("reject flow: preview patch button appears and can be dismissed", async ({
+  test("reject flow: agent prompt interaction is functional", async ({
     page,
   }) => {
     await page.goto("/");
     await resetTestState(page);
 
-    // Seed a project to exercise the bridge
-    const { manifest } = await seedTestProject(page);
-    expect(manifest.projectId).toBeTruthy();
+    // Create a project via bridge to exercise real code path
+    const { projectId } = await createAndSeedProject(page);
+    expect(projectId).toBeTruthy();
 
     // Type a prompt in the agent panel
     const promptTextarea = page.getByTestId("agent-prompt");
@@ -218,11 +211,10 @@ test.describe("agent patch", () => {
     const sendButton = page.getByTestId("agent-send");
     await expect(sendButton).toBeEnabled();
 
-    // Click send (UI interaction only; no API wired yet)
+    // Click send (UI interaction only; no API wired from AgentPanel yet)
     await sendButton.click();
 
-    // After clicking send, the prompt is still in the textarea
-    // (current AgentPanel does not clear on send)
+    // After clicking send, the prompt remains (current AgentPanel does not clear on send)
     await expect(promptTextarea).toHaveValue("Test reject flow");
   });
 

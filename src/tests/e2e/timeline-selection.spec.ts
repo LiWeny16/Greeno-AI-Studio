@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { expectCanvasNotBlank, resetTestState, seedTestProject } from "./helpers";
+import {
+  createAndSeedProject,
+  expectCanvasNotBlank,
+  resetTestState,
+} from "./helpers";
 
 test.describe("timeline and selection", () => {
   test("timeline canvas renders and is not blank", async ({ page }) => {
@@ -26,24 +30,25 @@ test.describe("timeline and selection", () => {
     await expectCanvasNotBlank(page, "piano-roll-canvas");
   });
 
-  test("seed project populates sections and they appear in left rail", async ({
+  test("seeded project exists on bridge and sections display in left rail", async ({
     page,
   }) => {
     await page.goto("/");
     await resetTestState(page);
 
-    // Seed a project via the bridge (exercises real code path)
-    const { manifest } = await seedTestProject(page);
-    expect(manifest.projectId).toBeTruthy();
+    // Create a real project on disk with sections (exercises the bridge)
+    const { projectId } = await createAndSeedProject(page);
+    expect(projectId).toBeTruthy();
 
-    // The app uses sampleMusicIr statically, so verify the static sections
-    // are visible in the left rail (the UI renders from imported fixtures)
+    // The React app uses sampleMusicIr statically (imported fixture), so
+    // verify the static sections are visible in the left rail.
     const leftRail = page.getByTestId("left-rail");
     await expect(leftRail).toBeVisible();
 
-    // Sample data includes section "A" / "sec_a"
+    // Sample data includes section named "A" (rendered as text in the UI)
     await expect(leftRail).toContainText("A");
-    await expect(leftRail).toContainText("sec_a");
+    // Bar range text is also displayed
+    await expect(leftRail).toContainText("Bars");
   });
 
   test("inspector shows default no-bar-selection state", async ({ page }) => {

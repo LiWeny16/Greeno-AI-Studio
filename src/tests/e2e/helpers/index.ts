@@ -230,6 +230,77 @@ export async function apiPreviewPatch(
 }
 
 /**
+ * Create a real project on disk with sample sections, motifs, and tracks.
+ *
+ * Unlike seedTestProject (which only returns fixture data without persisting),
+ * this creates a project via POST /api/projects and seeds it with section data
+ * via PUT /api/projects/:id/ir so that preview/apply endpoints work.
+ */
+export async function createAndSeedProject(page: Page): Promise<{
+  projectId: string;
+  ir: Record<string, unknown>;
+}> {
+  const created = await apiCreateProject(page, {
+    title: "Seeded E2E Project",
+    tempo: 120,
+    key: "A minor",
+    timeSignature: "4/4",
+  });
+  const projectId = created.manifest.projectId;
+
+  const seededIr = {
+    ...created.ir,
+    sections: [
+      {
+        id: "sec_a",
+        name: "A",
+        barRange: [1, 8] as [number, number],
+        style: {
+          genre: "minimal piano",
+          energy: 0.35,
+          instruments: ["piano"],
+        },
+        motifIds: ["motif_main"],
+        chords: ["Am", "F", "C", "G"],
+        locks: {
+          melody: true,
+          rhythm: false,
+          chords: false,
+          tempo: true,
+          key: true,
+        },
+      },
+    ],
+    motifs: [
+      {
+        id: "motif_main",
+        notes: [
+          {
+            pitch: "A4",
+            startBeat: 0,
+            durationBeats: 0.5,
+            velocity: 0.8,
+          },
+          {
+            pitch: "C5",
+            startBeat: 0.5,
+            durationBeats: 0.5,
+            velocity: 0.8,
+          },
+        ],
+        source: { type: "manual" as const },
+        lockStrength: 0.8,
+      },
+    ],
+    tracks: [],
+  };
+
+  await apiUpdateProjectIr(page, projectId, seededIr);
+
+  return { projectId, ir: seededIr };
+}
+
+/**
  * Apply a patch via POST /api/projects/:projectId/patches/apply.
  */
 export async function apiApplyPatch(

@@ -315,6 +315,8 @@ Workers:
 
 Browser does not launch local agents. `src/local-bridge` owns all subprocesses.
 
+### 10.1 Core Architecture
+
 Local CLI capability found on this machine:
 
 - `codex` exists and supports `codex exec` for non-interactive execution.
@@ -325,13 +327,56 @@ MVP adapter strategy:
 ```text
 UI prompt
   -> local bridge validates project + selection
-  -> bridge builds structured prompt with Music IR snapshot
-  -> Codex/Claude adapter runs non-interactive command
-  -> adapter parses output into IrPatchProposal
+  -> bridge loads Music IR snapshot as AgentState
+  -> adapter runs LangGraph ReAct loop:
+       AnalyzeRequest → Plan → ToolCall → Observe → GeneratePatch → SelfValidate → Finalize
+       (multi-step, LLM reasons + calls music-domain tools, tools are read-only or
+        produce intermediate artifacts, agent CANNOT write to project files)
+  -> adapter returns IrPatchProposal
   -> Zod validates
   -> UI shows diff
   -> user applies or rejects
 ```
+
+### 10.2 LangGraph ReAct Loop
+
+The agent uses **LangGraph** (`@langchain/langgraph`) to orchestrate a stateful ReAct (Reason + Act) loop as an **adapter-internal implementation detail**. The external API contract (AgentRequest → AgentStreamEvents → IrPatchProposal) does not change.
+
+Key design points:
+
+- **ReAct loop runs inside the bridge adapter**, not in the browser
+- **10 music-domain tools** available to the LLM: read_ir_section, analyze_motif, analyze_chord_progression, generate_motif_variation, generate_counter_melody, generate_bassline, generate_drum_pattern, validate_patch_schema, check_lock_violations, build_patch_json
+- All tools are **read-only or produce intermediate artifacts** — none can write to project files
+- **Safety limits**: max 10 iterations, max 5 tool calls per step, 30s timeout
+- **Streaming**: each reasoning step and tool call emits an AgentStreamEvent so the user can see the agent's thought process
+- **Self-validation**: generated patches are validated against schema and lock constraints before returning to the UI
+- **Mock agent** implements the same ReAct graph with deterministic tool outputs for testing
+
+```text
+LangGraph State Machine:
+  START → ANALYZE → PLAN → TOOL_EXECUTE → OBSERVE
+                ↑                              │
+                └────── need_more ─────────────┘
+                           │ confident
+                           ▼
+                GENERATE_PATCH → SELF_VALIDATE
+                           │            │
+                      passes        fails → back to PLAN
+                           │
+                           ▼
+                       FINALIZE → END
+```
+
+### 10.3 New Dependencies
+
+```text
+@langchain/langgraph     — TypeScript state machine for ReAct loop
+@langchain/anthropic     — Claude LLM backend (optional, capability-gated)
+@langchain/openai        — Codex LLM backend (optional, capability-gated)
+@langchain/core          — Base messages, tools, prompts
+```
+
+These are **adapter-level dependencies**. Default tests use the mock agent (no LLM required). Real LLM backends are capability-gated behind `CC_MUSIC_AGENT_ADAPTER=claude` or `=codex`.
 
 Default test mode uses `mock-agent`, not real Claude/Codex.
 
@@ -403,21 +448,25 @@ Done:
 - User can enter 3-8 notes, save motif, generate/duplicate section material.
 - MIDI round-trip preserves notes and tempo.
 
-### M4: Agent Patch Loop
+### M4: Agent Patch Loop (ReAct + LangGraph)
 
-- Mock agent returns structured patch.
-- Real Codex/Claude adapters behind capability flags.
-- Diff preview.
-- Apply/reject.
-- Undo/redo.
-- Single mutation pipeline: `UI command -> EditCommand/IrPatchProposal -> validate -> preview -> snapshot -> apply -> persist -> query invalidate`.
+- LangGraph TypeScript state machine: Analyze → Plan → ToolCall → Observe → Generate → Validate → Finalize.
+- 10 music-domain tools with function calling: read IR, analyze motif, generate variations, validate patches, render previews.
+- Mock agent implements full ReAct graph with deterministic tool outputs for testing.
+- Real Codex/Claude adapters behind capability flags, using `@langchain/anthropic` / `@langchain/openai`.
+- Streaming thought log: each ReAct step emitted as AgentStreamEvent to UI.
+- Self-validation: schema + lock checks before returning proposal to user.
+- Diff preview + Apply/Reject with undo/redo.
+- Safety: max 10 iterations, max 5 tool calls per step, 30s timeout, no direct file writes.
 
 Done:
 
-- Prompt "make bars 9-16 darker but keep motif" returns valid patch.
-- UI previews note/section changes.
-- Apply updates Music IR.
+- Mock ReAct agent returns valid patch with visible reasoning steps.
+- Prompt "make bars 9-16 darker but keep motif" triggers: analyze section → plan edits → generate variation → self-validate → propose patch.
+- UI previews note/section changes with thought log visible.
+- Apply updates Music IR through mutation pipeline.
 - Undo restores prior snapshot.
+- All failure modes testable: invalid tool output, schema-invalid patch, timeout, max iterations.
 
 ### M5: Export + Demo Hardening
 
