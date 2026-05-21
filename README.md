@@ -39,12 +39,10 @@ Create project → Arrange sections → Enter motif → Ask AI for variation
 ```bash
 # Frontend
 pnpm install
-pnpm dev          # starts Vite dev server
+pnpm dev
 
-# Python Backend
-cd src/workers/python
-uv sync
-uv run cc-music-server              # starts FastAPI on port 8787
+# Python Backend (auto-kills port conflicts)
+.\start.ps1
 ```
 
 ## Project Structure
