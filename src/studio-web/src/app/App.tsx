@@ -33,7 +33,6 @@ import { PianoRoll } from "../features/piano-roll/PianoRoll";
 import { Inspector } from "../features/inspector/Inspector";
 import { AgentPanel } from "../features/agent-panel/AgentPanel";
 import { Transport } from "../features/transport/Transport";
-import { QueryProvider } from "../lib/api";
 import { useProject, useUpdateProjectIr } from "../lib/api";
 
 export function App() {
@@ -93,7 +92,6 @@ export function App() {
   }, []);
 
   return (
-    <QueryProvider>
     <TooltipProvider delayDuration={300}>
       <div
         className="flex h-screen flex-col overflow-hidden bg-background text-foreground"
@@ -506,6 +504,5 @@ export function App() {
         )}
       </div>
     </TooltipProvider>
-    </QueryProvider>
   );
 }
