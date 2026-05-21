@@ -772,7 +772,12 @@ export declare const IrPatchProposalSchema: z.ZodObject<{
 export type BarRange = z.infer<typeof BarRangeSchema>;
 export type EditCommand = z.infer<typeof EditCommandSchema>;
 export type IrPatchProposal = z.infer<typeof IrPatchProposalSchema>;
+export type MidiClip = z.infer<typeof MidiClipSchema>;
+export type Motif = z.infer<typeof MotifSchema>;
 export type MusicIr = z.infer<typeof MusicIrSchema>;
+export type Note = z.infer<typeof NoteSchema>;
 export type ProjectEvent = z.infer<typeof ProjectEventSchema>;
 export type ProjectManifest = z.infer<typeof ProjectManifestSchema>;
+export type Section = z.infer<typeof SectionSchema>;
+export type Track = z.infer<typeof TrackSchema>;
 //# sourceMappingURL=schema.d.ts.map
