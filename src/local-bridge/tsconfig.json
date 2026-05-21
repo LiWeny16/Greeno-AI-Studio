@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "rootDir": "src",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../packages/agent-protocol" },
+    { "path": "../packages/music-ir" },
+    { "path": "../packages/tool-registry" }
+  ],
+  "include": ["src/**/*.ts"]
+}

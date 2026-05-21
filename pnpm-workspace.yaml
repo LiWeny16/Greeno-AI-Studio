@@ -1,0 +1,4 @@
+packages:
+  - src/studio-web
+  - src/local-bridge
+  - src/packages/*

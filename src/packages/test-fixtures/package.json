@@ -1,0 +1,19 @@
+{
+  "name": "@cc-music/test-fixtures",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@cc-music/agent-protocol": "workspace:*",
+    "@cc-music/music-ir": "workspace:*",
+    "@cc-music/tool-registry": "workspace:*"
+  }
+}

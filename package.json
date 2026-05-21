@@ -1,0 +1,34 @@
+{
+  "name": "cc-music",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @cc-music/local-bridge --filter @cc-music/studio-web dev",
+    "dev:bridge": "pnpm --filter @cc-music/local-bridge dev",
+    "dev:web": "pnpm --filter @cc-music/studio-web dev",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@playwright/test": "^1.45.0",
+    "@types/node": "^22.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.3.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.0"
+  }
+}

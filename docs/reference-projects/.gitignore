@@ -1,0 +1,5 @@
+# Reference projects are local shallow clones for research only.
+# Keep README.md tracked, but do not commit cloned upstream repositories.
+*/
+!.gitignore
+!README.md

@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": ".",
+    "declaration": true,
+    "declarationMap": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "paths": {
+      "@cc-music/agent-protocol": ["src/packages/agent-protocol/src/index.ts"],
+      "@cc-music/music-ir": ["src/packages/music-ir/src/index.ts"],
+      "@cc-music/test-fixtures": ["src/packages/test-fixtures/src/index.ts"],
+      "@cc-music/timeline-engine": ["src/packages/timeline-engine/src/index.ts"],
+      "@cc-music/tool-registry": ["src/packages/tool-registry/src/index.ts"]
+    },
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": ["node"]
+  }
+}
