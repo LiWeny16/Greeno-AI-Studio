@@ -44,7 +44,7 @@ pnpm dev          # starts Vite dev server
 # Python Backend
 cd src/workers/python
 uv sync
-uv run python -m cc_music.server    # starts FastAPI on port 8787
+uv run cc-music-server              # starts FastAPI on port 8787
 ```
 
 ## Project Structure
